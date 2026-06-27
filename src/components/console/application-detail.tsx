@@ -201,6 +201,14 @@ function SummaryBand({ decision, meta }: { decision: DetailProps["decision"]; me
         <div className="mt-2">
           <OutcomeBadge outcome={decision.outcome} label={decision.outcomeLabel} size="lg" />
         </div>
+        {decision.dataCoverage && (
+          <p className={cn("mt-2 text-[11px] font-medium tabular-nums", decision.dataCoverage.complete ? "text-muted-foreground" : "text-warm-foreground")}>
+            {decision.dataCoverage.connectedCount}/{decision.dataCoverage.knownCount} banks · {decision.dataCoverage.percent}% data coverage
+            {!decision.dataCoverage.complete && decision.dataCoverage.missingBankNames.length > 0 && (
+              <span className="font-normal"> · {decision.dataCoverage.missingBankNames.join(", ")} not connected</span>
+            )}
+          </p>
+        )}
       </div>
       <Stat
         label="Recommended limit"

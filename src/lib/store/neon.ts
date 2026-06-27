@@ -83,6 +83,13 @@ export class NeonStore implements Store {
       .where(and(eq(applications.sessionId, sessionId), eq(applications.id, id)));
   }
 
+  async updateConnectedBanks(sessionId: string, id: string, banks: string[] | null): Promise<void> {
+    await this.db
+      .update(applications)
+      .set({ connectedBanks: banks })
+      .where(and(eq(applications.sessionId, sessionId), eq(applications.id, id)));
+  }
+
   async createConsent(input: CreateConsentInput): Promise<ConsentRec> {
     const id = newId();
     const [row] = await this.db

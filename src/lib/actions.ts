@@ -107,6 +107,13 @@ export async function submitApplication(input: SubmitInput) {
   // 3. audit trail for the full flow
   const checks = originationChecks(input.personaId, decision);
   const incomeCheck = checks.checks.find((c) => c.id === "income");
+
+  // coverage gap: banks the applicant holds (per the registry) but did not connect
+  const missingBanks = all.filter((b) => !banks.includes(b));
+  const registryDisclosures = queryCreditRegistry(input.personaId);
+  const missingCredit = registryDisclosures.filter(
+    (d) => d.isCredit && missingBanks.includes(d.bankId),
+  ).length;
   const events: { type: string; message: string; actor: "applicant" | "system"; meta?: Record<string, unknown> }[] = [
     ...banks.map((bankId) => ({
       type: "consent.granted",
@@ -116,6 +123,14 @@ export async function submitApplication(input: SubmitInput) {
     })),
     { type: "onboarding.kyc", message: `Onboarding checks ${checks.allClear ? "cleared" : "flagged"} — identity verified, sanctions/PEP no match, AML low risk, no fraud signals; income verification ${incomeCheck?.status ?? "pass"}.`, actor: "system", meta: { allClear: checks.allClear, checks: checks.checks.map((c) => ({ id: c.id, status: c.status })) } },
     { type: "data.pull", message: `Aggregated accounts and ~6 months of transactions across ${banks.length} bank${banks.length > 1 ? "s" : ""} (${banks.map(bankName).join(", ")}) via the AIS provider (Berlin Group NextGenPSD2).`, actor: "system", meta: { banks, standard: "Berlin Group NextGenPSD2 XS2A" } },
+    ...(missingBanks.length
+      ? [{
+          type: "data.coverage_gap",
+          message: `Coverage gap — applicant connected ${banks.length} of ${all.length} known bank${all.length > 1 ? "s" : ""}. ${missingBanks.map(bankName).join(", ")} not connected${missingCredit > 0 ? `; the registry discloses ${missingCredit} credit agreement${missingCredit === 1 ? "" : "s"} there` : ""}. Automated approval is withheld pending full coverage.`,
+          actor: "system" as const,
+          meta: { connected: banks, missing: missingBanks, missingCredit },
+        }]
+      : []),
     { type: "categorisation", message: `Categorised ${decision.transactions.length} transactions (${decision.categoriserSource} categoriser).`, actor: "system", meta: { source: decision.categoriserSource, count: decision.transactions.length } },
     { type: "decision.automated", message: `Automated decision produced by the affordability engine + credit-bureau rule: ${decision.outcomeLabel}. Under GDPR Art. 22(3) the applicant may request human review.`, actor: "system", meta: { outcome: decision.outcome, recommendedLimit: decision.recommendedLimit, bureauScore: decision.bureau?.score ?? null, automated: true } },
     { type: "application.submitted", message: `Application submitted from a comparison-portal lead — €${request.amount.toLocaleString("de-DE")} over ${request.termMonths} months.`, actor: "applicant" },
@@ -284,15 +299,35 @@ export async function withdrawConsentAction(input: { consentId: string; applicat
   const store = getStore();
   const c = await store.withdrawConsent(sid, input.consentId);
   if (!c) return { ok: false as const, error: "Consent not found" };
+
+  // For a real session application, withdrawing a bank shrinks the connected set,
+  // so the affordability picture (and the data-coverage rule) is recomputed on
+  // the banks that remain. Seed/portfolio apps have no stored row — there the
+  // withdrawal stays a visual state, as before.
+  const app = await store.getApplicationById(sid, input.applicationId);
+  let recomputedLabel: string | null = null;
+  if (app && app.source !== "seed") {
+    const current = app.connectedBanks ?? banksForPersona(app.personaId);
+    const remaining = current.filter((b) => b !== c.bankId);
+    await store.updateConnectedBanks(sid, app.id, remaining);
+    const request = { amount: app.amount, termMonths: app.termMonths, purpose: app.purpose };
+    const d = await getDecision(app.personaId, request, "seed", undefined, remaining);
+    await store.updateApplicationStatus(sid, app.id, outcomeToStatus(d.outcome));
+    recomputedLabel = d.outcomeLabel;
+  }
+
   await store.appendAudit({
     sessionId: sid,
     applicationId: input.applicationId,
     type: "consent.withdrawn",
-    message: "Consent withdrawn by applicant. Account data hidden from the console (visual state).",
+    message: recomputedLabel
+      ? `Consent withdrawn for ${bankName(c.bankId)}. Decision recomputed on the remaining banks: ${recomputedLabel}.`
+      : `Consent withdrawn for ${bankName(c.bankId)}. Account data hidden from the console (visual state).`,
     actor: "applicant",
-    meta: { consentId: input.consentId },
+    meta: { consentId: input.consentId, bankId: c.bankId, recomputed: recomputedLabel },
   });
   revalidatePath(`/console/applications/${input.applicationId}`);
+  revalidatePath("/console");
   revalidatePath("/console/consents");
   return { ok: true as const };
 }

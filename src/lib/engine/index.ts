@@ -14,6 +14,8 @@ import {
 import type {
   AdverseAnalysis,
   BureauInput,
+  CoverageInput,
+  DataCoverage,
   DecisionPackage,
   Haushaltsrechnung,
   IncomeAnalysis,
@@ -190,6 +192,7 @@ export function runDecision(
   product: ProductConfig,
   householdSize: number,
   bureau?: BureauInput,
+  coverage?: CoverageInput,
 ): DecisionPackage {
   const income = analyseIncome(txns);
   const obligations = analyseObligations(txns);
@@ -391,6 +394,45 @@ export function runDecision(
     });
   }
 
+  // R7 — data coverage. Every bank the applicant holds should be connected
+  // before an automated approval. A bank left unconnected can hide income but,
+  // more often, obligations — so an incomplete picture is referred to a human
+  // rather than auto-approved. Mirrors the real pattern: if the bureau lists
+  // more credit than the connected accounts show, the lender asks the customer
+  // to add the missing accounts. Only added when the caller supplies coverage.
+  let dataCoverage: DataCoverage | undefined;
+  if (coverage) {
+    const complete = coverage.connectedCount >= coverage.knownCount;
+    const percent = coverage.knownCount > 0
+      ? Math.round((coverage.connectedCount / coverage.knownCount) * 100)
+      : 100;
+    dataCoverage = {
+      connectedCount: coverage.connectedCount,
+      knownCount: coverage.knownCount,
+      percent,
+      missingBankNames: coverage.missingBankNames,
+      missingCreditCount: coverage.missingCreditCount,
+      complete,
+    };
+    const r7: RuleStatus = complete ? "pass" : "refer";
+    rules.push({
+      id: "coverage",
+      label: "Data coverage",
+      description:
+        "Every bank the applicant is known to hold should be connected before an automated approval. An unconnected bank can hide obligations, so an incomplete picture is referred rather than auto-approved.",
+      status: r7,
+      valueLabel: `${coverage.connectedCount}/${coverage.knownCount} banks connected`,
+      thresholdLabel: `${coverage.knownCount}/${coverage.knownCount} banks`,
+      inputs: [
+        { label: "Connected banks", value: `${coverage.connectedCount}` },
+        { label: "Known banks", value: `${coverage.knownCount}` },
+        { label: "Not connected", value: coverage.missingBankNames.length ? coverage.missingBankNames.join(", ") : "none" },
+        { label: "Disclosed credit at missing banks", value: `${coverage.missingCreditCount}` },
+      ],
+      txnIds: [],
+    });
+  }
+
   // ---- aggregate outcome ----
   const hasFail = rules.some((r) => r.status === "fail");
   const hasRefer = rules.some((r) => r.status === "refer");
@@ -433,6 +475,7 @@ export function runDecision(
     conditions,
     recommendedLimit,
     maxEligible,
+    dataCoverage,
     transactions: txns,
   };
 }

@@ -85,6 +85,34 @@ export interface BureauInput {
   worstNegativeLabel?: string;
 }
 
+/**
+ * Bank-connection coverage, computed by the caller (which knows the persona's
+ * full bank set) and passed into the decision. Drives the R7 data-coverage rule.
+ * Kept pre-resolved so the engine stays free of any demo-bank dependency.
+ */
+export interface CoverageInput {
+  /** Banks the applicant actually connected (AIS consent granted). */
+  connectedCount: number;
+  /** Banks the applicant is known to hold (registry + IBAN discovery). */
+  knownCount: number;
+  /** Display names of the known banks that were NOT connected. */
+  missingBankNames: string[];
+  /** Credit agreements the registry discloses at the unconnected banks. */
+  missingCreditCount: number;
+}
+
+/** Data-completeness summary surfaced on the decision package (for the UI). */
+export interface DataCoverage {
+  connectedCount: number;
+  knownCount: number;
+  /** 0–100. */
+  percent: number;
+  missingBankNames: string[];
+  missingCreditCount: number;
+  /** True when every known bank is connected. */
+  complete: boolean;
+}
+
 export interface HaushaltLine {
   id: string;
   label: string;
@@ -121,6 +149,8 @@ export interface DecisionPackage {
   conditions: string[];
   recommendedLimit: number | null;
   maxEligible: number;
+  /** Bank-connection coverage behind the decision, if supplied by the caller. */
+  dataCoverage?: DataCoverage;
   /** Categorised transactions the package was computed from. */
   transactions: CategorisedTransaction[];
 }
