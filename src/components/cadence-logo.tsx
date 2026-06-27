@@ -42,14 +42,22 @@ export function CadenceMark({
 export function CadenceLogo({
   className,
   animate = false,
+  size = "default",
 }: {
   className?: string;
   animate?: boolean;
+  size?: "default" | "lg";
 }) {
+  const big = size === "lg";
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
-      <CadenceMark animate={animate} />
-      <span className="font-heading text-lg font-semibold tracking-tight">
+      <CadenceMark animate={animate} className={big ? "h-9 w-9" : undefined} />
+      <span
+        className={cn(
+          "font-heading font-semibold tracking-tight",
+          big ? "text-2xl" : "text-lg",
+        )}
+      >
         Cadence
       </span>
     </span>

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { PublicHeader } from "@/components/layout/public-header";
 import { LearnNav } from "@/components/learn/learn-nav";
+import { LinkedInIcon } from "@/components/linkedin-icon";
 
 export default function LearnLayout({ children }: { children: ReactNode }) {
   return (
@@ -28,8 +29,9 @@ export default function LearnLayout({ children }: { children: ReactNode }) {
               href="https://www.linkedin.com/in/ajaykrishna1/"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-medium text-foreground underline underline-offset-4 hover:text-brand"
+              className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4 hover:text-brand"
             >
+              <LinkedInIcon className="h-4 w-4" />
               Ajay Krishna
             </a>
           </p>

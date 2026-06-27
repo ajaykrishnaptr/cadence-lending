@@ -11,7 +11,7 @@ import {
 import { PublicHeader } from "@/components/layout/public-header";
 import { Waveform } from "@/components/brand/waveform";
 import { Button } from "@/components/ui/button";
-import { CadenceMark } from "@/components/cadence-logo";
+import { LinkedInIcon } from "@/components/linkedin-icon";
 
 const FLOW = [
   { label: "Consent", desc: "AIS access, 180-day expiry", icon: ShieldCheck },
@@ -32,11 +32,7 @@ export default function Home() {
         <div className="bg-grid pointer-events-none absolute inset-0 opacity-[0.4]" />
         <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:py-24">
           <div className="flex flex-col justify-center">
-            <span className="inline-flex w-fit items-center gap-2 rounded-full border bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
-              <CadenceMark className="h-5 w-5" animate />
-              Open Finance Data · lending decision engine
-            </span>
-            <h1 className="mt-5 font-heading text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
+            <h1 className="font-heading text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               Read the rhythm.
               <br />
               <span className="text-brand">Lend with reasons.</span>
@@ -159,8 +155,9 @@ export default function Home() {
               href="https://www.linkedin.com/in/ajaykrishna1/"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-medium text-foreground underline underline-offset-4 hover:text-brand"
+              className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4 hover:text-brand"
             >
+              <LinkedInIcon className="h-4 w-4" />
               Ajay Krishna
             </a>
           </p>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LinkedInIcon } from "@/components/linkedin-icon";
 import {
   ArrowRight,
   PlayCircle,
@@ -166,8 +167,9 @@ export default function TourPage() {
               href="https://www.linkedin.com/in/ajaykrishna1/"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-medium text-foreground underline underline-offset-4 hover:text-brand"
+              className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4 hover:text-brand"
             >
+              <LinkedInIcon className="h-4 w-4" />
               Ajay Krishna
             </a>
           </p>
