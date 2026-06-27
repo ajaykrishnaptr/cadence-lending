@@ -29,9 +29,6 @@ export function PublicHeader() {
             <Link href="/learn">Learn</Link>
           </Button>
           <ModeToggle />
-          <Button size="sm" asChild className="ml-1">
-            <Link href="/login">Sign in</Link>
-          </Button>
         </nav>
       </div>
     </header>

@@ -59,10 +59,10 @@ export function ConsoleShell({
     });
   }
 
-  function switchRole() {
+  function exitConsole() {
     startTransition(async () => {
       await logout();
-      router.push("/login");
+      router.push("/");
       router.refresh();
     });
   }
@@ -112,8 +112,8 @@ export function ConsoleShell({
             </span>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="gap-1.5" onClick={switchRole} disabled={pending}>
-              <LogOut className="h-3.5 w-3.5" /> Switch role
+            <Button variant="ghost" size="sm" className="gap-1.5" onClick={exitConsole} disabled={pending}>
+              <LogOut className="h-3.5 w-3.5" /> Exit console
             </Button>
             <ModeToggle />
           </div>
