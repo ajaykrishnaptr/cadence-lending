@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ROLE_COOKIE } from "@/middleware";
 import { getSessionId } from "./session";
 import { getStore } from "./store";
-import { getProfile, banksForPersona, bankName, detectConnectableBanks, queryCreditRegistry } from "./demo-bank";
+import { getProfile, banksForPersona, bankName, detectConnectableBanks, queryCreditRegistry, creditBureauProfile } from "./demo-bank";
 import { getDecision, getCategorised } from "./cadence";
 import "./llm"; // side-effect: registers the live Gemini categoriser
 import { outcomeToStatus } from "./cadence/applications";
@@ -171,17 +171,19 @@ export async function suggestBanksAction(input: { personaId: string; connectedBa
 export async function queryRegistryAction(input: { personaId: string }) {
   const sid = await getSessionId();
   const disclosures = queryCreditRegistry(input.personaId);
+  const bureau = creditBureauProfile(input.personaId);
   const banks = [...new Set(disclosures.map((d) => d.bankId))];
   const creditCount = disclosures.filter((d) => d.isCredit).length;
+  const hardNeg = bureau.negatives.some((n) => n.hard);
   await getStore().appendAudit({
     sessionId: sid,
     applicationId: null,
     type: "registry.query",
-    message: `Demo Credit Registry consulted with consent (synthetic bureau) — disclosed ${disclosures.length} record${disclosures.length === 1 ? "" : "s"} (${creditCount} credit agreement${creditCount === 1 ? "" : "s"}) across ${banks.length} institution${banks.length === 1 ? "" : "s"}.`,
+    message: `Demo Credit Registry consulted with consent (synthetic bureau) — score ${bureau.score}/100 (${bureau.band}), ${bureau.negatives.length} negative feature${bureau.negatives.length === 1 ? "" : "s"}${hardNeg ? " incl. a hard negative" : ""}; disclosed ${creditCount} credit agreement${creditCount === 1 ? "" : "s"} across ${banks.length} institution${banks.length === 1 ? "" : "s"}.`,
     actor: "applicant",
-    meta: { banks, disclosures: disclosures.length, creditAgreements: creditCount },
+    meta: { banks, disclosures: disclosures.length, creditAgreements: creditCount, score: bureau.score, negatives: bureau.negatives.length, hardNegative: hardNeg },
   });
-  return { ok: true as const, disclosures };
+  return { ok: true as const, disclosures, bureau };
 }
 
 // ---- live re-categorisation (Gemini, with rules fallback) ----

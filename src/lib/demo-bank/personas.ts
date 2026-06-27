@@ -339,6 +339,37 @@ export const PROFILES: ProfileSpec[] = [
       ],
     },
   },
+  {
+    id: "bruno-falk",
+    name: "Bruno Falk",
+    tagline: "Affordable on paper, blocked by the bureau",
+    expected: "decline",
+    expectedLabel: "Decline — credit-bureau knock-out",
+    age: 36,
+    occupation: "IT administrator",
+    city: "Hannover",
+    householdSize: 1,
+    tenureMonths: 6,
+    request: { amount: 9000, termMonths: 36, purpose: "major-purchase" },
+    blurb:
+      "His account looks comfortably affordable — steady salary, low fixed costs, no existing credit — so on the Haushaltsrechnung alone he is a clean approve. But the credit registry shows an active payment default and a debt-collection request. A hard negative is a knock-out regardless of affordability: the loan is declined. The case for combining open-banking affordability with a bureau check — neither replaces the other.",
+    openingBalance: 2200,
+    savingsBalance: 5400,
+    salary: { employer: "Norddata Systeme", amount: 3300, day: 28, jitter: 0.02 },
+    recurring: [
+      { desc: "Miete Wohnung", counterparty: "Hausverwaltung Leineblick", amount: 820, day: 1, category: "rent" },
+      { desc: "Stadtwerke Hannover Strom", amount: 74, day: 6, category: "utilities" },
+      { desc: "FaserNet Internet", amount: 35, day: 9, category: "utilities" },
+      { desc: "MobilEins Mobilfunk", amount: 25, day: 12, category: "utilities" },
+      { desc: "SchildVersicherung Hausrat", amount: 16, day: 15, category: "insurance" },
+      { desc: "Streamly Abo", amount: 13, day: 18, category: "subscriptions" },
+    ],
+    spend: [
+      { merchants: GROCERS, perMonth: 9, avg: 45, jitter: 0.45, category: "groceries" },
+      { merchants: TRANSIT, perMonth: 2, avg: 55, jitter: 0.2, category: "transport" },
+      { merchants: EATING_OUT, perMonth: 3, avg: 26, jitter: 0.5, category: "discretionary" },
+    ],
+  },
 ];
 
 export function getProfile(id: string): ProfileSpec | undefined {

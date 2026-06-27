@@ -68,6 +68,23 @@ export interface AdverseAnalysis {
   conditions: string[];
 }
 
+/**
+ * Decision-relevant view of a credit-bureau record (the fictional Demo Credit
+ * Registry). The engine only needs the score and whether a hard negative is
+ * present; the full disclosure (individual negatives) lives in the registry.
+ */
+export interface BureauInput {
+  /** 0–100, higher is better (synthetic). */
+  score: number;
+  band: string;
+  /** Active default / insolvency / public-register entry → knock-out. */
+  hardNegative: boolean;
+  /** Total negative features on file. */
+  negativeCount: number;
+  /** Short label of the worst negative, for the rule readout. */
+  worstNegativeLabel?: string;
+}
+
 export interface HaushaltLine {
   id: string;
   label: string;
@@ -97,6 +114,8 @@ export interface DecisionPackage {
   stressedInstalment: number;
   dti: number;
   rules: RuleResult[];
+  /** The bureau record the decision used, if any (for explainability). */
+  bureau?: BureauInput;
   outcome: DecisionOutcome;
   outcomeLabel: string;
   conditions: string[];

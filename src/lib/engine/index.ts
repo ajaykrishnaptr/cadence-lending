@@ -13,6 +13,7 @@ import {
 } from "./config";
 import type {
   AdverseAnalysis,
+  BureauInput,
   DecisionPackage,
   Haushaltsrechnung,
   IncomeAnalysis,
@@ -188,6 +189,7 @@ export function runDecision(
   request: LoanRequest,
   product: ProductConfig,
   householdSize: number,
+  bureau?: BureauInput,
 ): DecisionPackage {
   const income = analyseIncome(txns);
   const obligations = analyseObligations(txns);
@@ -362,6 +364,33 @@ export function runDecision(
     txnIds: [...adverse.overdraftTxnIds, ...adverse.gamblingTxnIds],
   });
 
+  // R6 — credit bureau (the fictional Demo Credit Registry). A hard negative
+  // (active default / insolvency / public-register entry) is a knock-out → fail
+  // → decline, regardless of affordability. A low score (no hard negative) is a
+  // referral. The bureau holds no income data, so it never *replaces* the
+  // affordability check — it only adds a gate on top of it.
+  if (bureau) {
+    let r6: RuleStatus = "pass";
+    if (bureau.hardNegative) r6 = "fail";
+    else if (bureau.score < product.minBureauScore) r6 = "refer";
+    rules.push({
+      id: "bureau",
+      label: "Credit bureau",
+      description: "Demo Credit Registry score and negative features. A hard negative (default, insolvency, public-register entry) blocks the loan; a low score is referred.",
+      status: r6,
+      valueLabel: bureau.hardNegative
+        ? `${bureau.worstNegativeLabel ?? "Hard negative"} on file`
+        : `Score ${bureau.score}/100 (${bureau.band})${bureau.negativeCount > 0 ? ` · ${bureau.negativeCount} negative` : ""}`,
+      thresholdLabel: `≥ ${product.minBureauScore}/100 and no hard negatives`,
+      inputs: [
+        { label: "Bureau score", value: `${bureau.score}/100 (${bureau.band})` },
+        { label: "Negative features", value: `${bureau.negativeCount}` },
+        { label: "Hard negative", value: bureau.hardNegative ? `Yes — ${bureau.worstNegativeLabel ?? "knock-out"}` : "No" },
+      ],
+      txnIds: [],
+    });
+  }
+
   // ---- aggregate outcome ----
   const hasFail = rules.some((r) => r.status === "fail");
   const hasRefer = rules.some((r) => r.status === "refer");
@@ -398,6 +427,7 @@ export function runDecision(
     stressedInstalment,
     dti,
     rules,
+    bureau,
     outcome,
     outcomeLabel,
     conditions,

@@ -1,4 +1,5 @@
 import type { Category } from "../categories";
+import type { BureauInput } from "../engine/types";
 import { getBank } from "./banks";
 import { getProfile, type ProfileSpec, type RecurringSpec } from "./personas";
 
@@ -126,4 +127,69 @@ export function queryCreditRegistry(personaId: string): RegistryDisclosure[] {
 /** Distinct banks the registry can disclose for a persona (picker pre-seed). */
 export function registryBanks(personaId: string): string[] {
   return [...new Set(queryCreditRegistry(personaId).map((d) => d.bankId))];
+}
+
+// ---- credit score + negative features (the bureau's decision inputs) ----
+
+export interface BureauNegative {
+  kind: "default" | "collection" | "insolvency" | "public-register";
+  label: string;
+  detail: string;
+  /** Hard negatives (active default / insolvency / public register) knock out. */
+  hard: boolean;
+  since: number;
+}
+
+export interface BureauProfile {
+  /** 0–100, higher is better (synthetic). */
+  score: number;
+  band: string;
+  negatives: BureauNegative[];
+}
+
+/** Synthetic per-persona credit scores. Most are clean; one is a knock-out. */
+const BUREAU_SCORE: Record<string, number> = {
+  "clara-bauer": 96,
+  "tomas-neuer": 84,
+  "mara-vogel": 63,
+  "jonas-frei": 95,
+  "sofia-lindqvist": 81,
+  "erik-hofer": 88,
+  "lena-brandt": 86,
+  "bruno-falk": 31,
+};
+
+/** Negative features on file. Only the knock-out persona carries hard negatives. */
+const BUREAU_NEGATIVES: Record<string, BureauNegative[]> = {
+  "bruno-falk": [
+    { kind: "default", label: "Active payment default", detail: "TelKom Nord — €1,240 outstanding", hard: true, since: 2025 },
+    { kind: "collection", label: "Debt-collection request", detail: "Inkasso Rhein GmbH", hard: false, since: 2025 },
+  ],
+};
+
+function scoreBand(score: number): string {
+  if (score >= 90) return "Excellent";
+  if (score >= 75) return "Good";
+  if (score >= 60) return "Fair";
+  if (score >= 45) return "Elevated risk";
+  return "High risk";
+}
+
+/** The bureau's full record for a persona (score + negatives). */
+export function creditBureauProfile(personaId: string): BureauProfile {
+  const score = BUREAU_SCORE[personaId] ?? 80;
+  return { score, band: scoreBand(score), negatives: BUREAU_NEGATIVES[personaId] ?? [] };
+}
+
+/** Decision-relevant view the engine consumes. */
+export function bureauInput(personaId: string): BureauInput {
+  const p = creditBureauProfile(personaId);
+  const hard = p.negatives.find((n) => n.hard);
+  return {
+    score: p.score,
+    band: p.band,
+    hardNegative: Boolean(hard),
+    negativeCount: p.negatives.length,
+    worstNegativeLabel: hard?.label ?? p.negatives[0]?.label,
+  };
 }

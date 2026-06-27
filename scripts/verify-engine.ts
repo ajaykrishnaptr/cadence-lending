@@ -3,7 +3,7 @@
  * run the decision engine, and confirm outcomes match the intended demo design.
  *   npx tsx scripts/verify-engine.ts
  */
-import { PROFILES, getPersonaData } from "../src/lib/demo-bank";
+import { PROFILES, getPersonaData, bureauInput } from "../src/lib/demo-bank";
 import { categoriseByRules } from "../src/lib/categoriser/rules";
 import { runDecision } from "../src/lib/engine";
 import { CONSUMER_LOAN } from "../src/lib/engine/config";
@@ -18,6 +18,7 @@ const EXPECT: Record<string, string> = {
   "sofia-lindqvist": "refer",
   "erik-hofer": "approve",
   "lena-brandt": "refer",
+  "bruno-falk": "decline",
 };
 
 let pass = 0;
@@ -34,7 +35,7 @@ for (const p of PROFILES) {
       source: "rules" as const,
     };
   });
-  const d = runDecision(cats, p.request, CONSUMER_LOAN, p.householdSize);
+  const d = runDecision(cats, p.request, CONSUMER_LOAN, p.householdSize, bureauInput(p.id));
   const ok = d.outcome === EXPECT[p.id];
   if (ok) pass++;
   console.log(
@@ -68,4 +69,16 @@ console.log(`  Both banks     -> ${both.outcomeLabel.padEnd(22)} avail €${both
 const flips = demoOnly.outcome === "approve" && both.outcome === "refer";
 console.log(flips ? "  ✓ connecting the 2nd bank flips approve -> refer" : "  ✗ expected approve -> refer");
 
-if (pass !== PROFILES.length || !flips) process.exit(1);
+// Bureau knock-out teaching case: Bruno approves on affordability, declines once
+// the credit-bureau hard negative is applied.
+const brunoP = PROFILES.find((p) => p.id === "bruno-falk")!;
+const brunoCats = catOf(getPersonaData("bruno-falk")!.transactions);
+const brunoNoBureau = runDecision(brunoCats, brunoP.request, CONSUMER_LOAN, brunoP.householdSize);
+const brunoWithBureau = runDecision(brunoCats, brunoP.request, CONSUMER_LOAN, brunoP.householdSize, bureauInput("bruno-falk"));
+console.log(`\nBureau case — Bruno Falk (request €${brunoP.request.amount}/${brunoP.request.termMonths}mo):`);
+console.log(`  Affordability only -> ${brunoNoBureau.outcomeLabel.padEnd(22)} avail €${brunoNoBureau.haushalt.available}`);
+console.log(`  With bureau        -> ${brunoWithBureau.outcomeLabel.padEnd(22)} (score ${bureauInput("bruno-falk").score}, hard negative ${bureauInput("bruno-falk").hardNegative})`);
+const bureauFlips = brunoNoBureau.outcome === "approve" && brunoWithBureau.outcome === "decline";
+console.log(bureauFlips ? "  ✓ the bureau hard negative flips approve -> decline" : "  ✗ expected approve -> decline");
+
+if (pass !== PROFILES.length || !flips || !bureauFlips) process.exit(1);

@@ -1,5 +1,5 @@
 import { ais, type BalancePoint } from "../ais";
-import { getProfile } from "../demo-bank";
+import { getProfile, bureauInput } from "../demo-bank";
 import { CONSUMER_LOAN, runDecision, type DecisionPackage, type ProductConfig } from "../engine";
 import type { Account, CategoriserSource, LoanRequest } from "../types";
 import { categorise, type CategoriseResult } from "./categorise";
@@ -71,7 +71,7 @@ export async function getDecision(
   }
 
   const cat = await getCategorised(personaId, source, banks);
-  const pkg = runDecision(cat.transactions, request, product, profile.householdSize);
+  const pkg = runDecision(cat.transactions, request, product, profile.householdSize, bureauInput(personaId));
   const enriched = Object.assign(pkg, {
     categoriserSource: cat.source,
     categoriserFellBack: cat.fellBack,

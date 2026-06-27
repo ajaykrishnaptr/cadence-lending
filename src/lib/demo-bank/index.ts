@@ -11,8 +11,8 @@ import { getPersonaData, type SeededTransaction } from "./generator";
 import { getProfile, listPersonas, PROFILES, banksForPersona } from "./personas";
 
 export { listPersonas, PROFILES, getProfile, banksForPersona } from "./personas";
-export { queryCreditRegistry, registryBanks } from "./registry";
-export type { RegistryDisclosure } from "./registry";
+export { queryCreditRegistry, registryBanks, creditBureauProfile, bureauInput } from "./registry";
+export type { RegistryDisclosure, BureauProfile, BureauNegative } from "./registry";
 export { BANKS, BANK_LIST, BANK_DIRECTORY, getBank, bankName, PRIMARY_BANK } from "./banks";
 export type { Aspsp } from "./banks";
 export type { SeededTransaction, PersonaData } from "./generator";

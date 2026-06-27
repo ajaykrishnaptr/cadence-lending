@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { PersonaProfile, LoanPurpose, ConsentScope } from "@/lib/types";
-import type { BankSuggestion, RegistryDisclosure } from "@/lib/demo-bank";
+import type { BankSuggestion, RegistryDisclosure, BureauProfile } from "@/lib/demo-bank";
 import { BANK_DIRECTORY, bankName, getBank } from "@/lib/demo-bank/banks";
 import { CONSUMER_LOAN, monthlyInstalment } from "@/lib/engine/config";
 import { formatEUR, maskIban } from "@/lib/format";
@@ -472,6 +472,7 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
   onNext: () => void;
 }) {
   const [state, setState] = useState<"idle" | "loading" | "done">(disclosures.length ? "done" : "idle");
+  const [bureau, setBureau] = useState<BureauProfile | null>(null);
 
   function search() {
     if (state === "loading") return;
@@ -480,6 +481,7 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
     setTimeout(async () => {
       const res = await queryRegistryAction({ personaId: persona.id });
       setDisclosures(res.disclosures);
+      setBureau(res.bureau);
       setDiscovered([...new Set(res.disclosures.map((d) => d.bankId))]);
       setState("done");
     }, 850);
@@ -522,6 +524,36 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
 
       {state === "done" && (
         <div className="mt-5 space-y-3">
+          {/* Credit score + negative features (the bureau's decision inputs) */}
+          {bureau && (
+            <div className={cn("rounded-xl border p-3", bureau.negatives.some((n) => n.hard) ? "border-danger/40 bg-danger-muted/30" : "bg-muted/30")}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Credit score</span>
+                <span className="flex items-baseline gap-1">
+                  <span className={cn("font-heading text-2xl font-semibold tabular-nums", bureau.score >= 75 ? "text-success-foreground" : bureau.score >= 60 ? "text-warm" : "text-danger-foreground")}>{bureau.score}</span>
+                  <span className="text-xs text-muted-foreground">/100 · {bureau.band}</span>
+                </span>
+              </div>
+              {bureau.negatives.length > 0 && (
+                <ul className="mt-2 space-y-1 border-t pt-2">
+                  {bureau.negatives.map((n, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className={cn("h-3 w-3", n.hard ? "text-danger" : "text-warm")} />
+                        <span className={cn("font-medium", n.hard ? "text-danger-foreground" : "text-warm")}>{n.label}</span>
+                        <span className="text-muted-foreground">· {n.detail}</span>
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{n.hard ? "knock-out" : "soft"} · {n.since}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {bureau.negatives.some((n) => n.hard) && (
+                <p className="mt-2 text-[11px] text-danger-foreground">A hard negative blocks the loan regardless of affordability — the engine will decline.</p>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-muted/40 px-3 py-2 text-xs">
             <Sparkles className="h-4 w-4 shrink-0 text-brand" />
             <span>{creditCount > 0 && <><span className="font-medium text-warm">{creditCount} credit agreement{creditCount > 1 ? "s" : ""}</span> and </>}account relationships across <span className="font-medium text-foreground">{banks.length} institution{banks.length > 1 ? "s" : ""}</span>. You&apos;ll authorise PSD2 consent per bank on the next step to pull the actual data.</span>

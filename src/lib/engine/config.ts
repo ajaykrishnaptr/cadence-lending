@@ -20,6 +20,8 @@ export interface ProductConfig {
   minTenureMonths: number;
   /** Minimum income-stability score (0–1) for a clean pass. */
   minStability: number;
+  /** Minimum credit-bureau score (0–100) below which the case is referred. */
+  minBureauScore: number;
   amountRange: { min: number; max: number; step: number };
   termRange: { min: number; max: number; step: number };
   /** Mortgage-only inputs, surfaced on the inactive tab. */
@@ -39,6 +41,7 @@ export const CONSUMER_LOAN: ProductConfig = {
   stressRateDelta: 0.03,
   minTenureMonths: 3,
   minStability: 0.88,
+  minBureauScore: 50,
   amountRange: { min: 1000, max: 50000, step: 500 },
   termRange: { min: 12, max: 84, step: 6 },
 };
@@ -53,6 +56,7 @@ export const MORTGAGE: ProductConfig = {
   stressRateDelta: 0.03,
   minTenureMonths: 12,
   minStability: 0.9,
+  minBureauScore: 60,
   amountRange: { min: 50000, max: 1000000, step: 5000 },
   termRange: { min: 120, max: 360, step: 60 },
   mortgageInputs: { maxLtv: 0.9, minEquity: 0.1 },
