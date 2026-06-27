@@ -1,0 +1,166 @@
+import { z } from "zod";
+import { generateObject, generateText } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { CATEGORY_KEYS } from "./categories";
+import { categoriseByRules } from "./categoriser/rules";
+import { CATEGORISER_SYSTEM, CATEGORISER_FEWSHOT } from "./categoriser/prompt";
+import { registerLiveCategoriser } from "./cadence/categorise";
+import { buildRationale } from "./rationale";
+import type { DecisionPackage } from "./engine";
+import type { CategorisedTransaction, Transaction } from "./types";
+
+/**
+ * LLM provider abstraction. Gemini 2.5 Flash via the Vercel AI SDK in the demo;
+ * swappable for a local model in dev. The model does two jobs only —
+ * transaction categorisation and a grounded rationale — and every call has a
+ * deterministic fallback so the product degrades gracefully and always says
+ * which path ran. The credit decision itself is never made by the model.
+ */
+
+const MODEL_ID = "gemini-2.5-flash";
+const apiKey = process.env.GEMINI_API_KEY;
+
+export function llmConfigured(): boolean {
+  return Boolean(apiKey);
+}
+
+function model() {
+  if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+  const google = createGoogleGenerativeAI({ apiKey });
+  return google(MODEL_ID);
+}
+
+// ---- categorisation ----
+
+const categorySchema = z.object({
+  items: z.array(
+    z.object({
+      index: z.number().int(),
+      category: z.enum(CATEGORY_KEYS),
+      subcategory: z.string(),
+      confidence: z.number().min(0).max(1),
+      isIncome: z.boolean(),
+      isRecurring: z.boolean(),
+      isObligation: z.boolean(),
+    }),
+  ),
+});
+
+const SYSTEM = CATEGORISER_SYSTEM;
+const FEW_SHOT = CATEGORISER_FEWSHOT;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** Live Gemini categoriser. Throws on any failure so callers fall back to rules. */
+export async function categoriseWithGemini(
+  txns: Transaction[],
+): Promise<CategorisedTransaction[]> {
+  const m = model();
+  const out: CategorisedTransaction[] = new Array(txns.length);
+
+  await Promise.all(
+    chunk(txns.map((t, i) => ({ t, i })), 40).map(async (group) => {
+      const lines = group
+        .map(({ t, i }) => `${i}: "${t.description}" amount ${t.amount.toFixed(2)} EUR (${t.direction})`)
+        .join("\n");
+      const { object } = await generateObject({
+        model: m,
+        schema: categorySchema,
+        temperature: 0.1,
+        system: SYSTEM,
+        prompt: `${FEW_SHOT}\n\nCategorise these ${group.length} transactions:\n${lines}`,
+      });
+      const byIndex = new Map(object.items.map((it) => [it.index, it]));
+      for (const { t, i } of group) {
+        const r = byIndex.get(i);
+        out[i] = r
+          ? {
+              ...t,
+              categorisation: {
+                category: r.category,
+                subcategory: r.subcategory,
+                confidence: r.confidence,
+                isIncome: r.isIncome,
+                isRecurring: r.isRecurring,
+                isObligation: r.isObligation,
+              },
+              source: "gemini",
+            }
+          : { ...t, categorisation: categoriseByRules(t), source: "rules" };
+      }
+    }),
+  );
+
+  return out;
+}
+
+// register so the cadence categorise() gemini path is wired without a hard dep
+registerLiveCategoriser(categoriseWithGemini);
+
+// ---- live evaluation (Gemini over the labelled set) ----
+export async function evaluateWithGemini() {
+  const { getEvalCases, scoreCases, baselineEval } = await import("./eval");
+  const cases = getEvalCases();
+  if (!llmConfigured()) {
+    return { result: baselineEval(), source: "rules" as const, fellBack: true };
+  }
+  try {
+    const predicted = await categoriseWithGemini(cases.map((c) => c.transaction));
+    const result = scoreCases(cases, predicted.map((p) => p.categorisation));
+    return { result, source: "gemini" as const };
+  } catch {
+    return { result: baselineEval(), source: "rules" as const, fellBack: true };
+  }
+}
+
+// ---- grounded rationale ----
+
+export interface RationaleResult {
+  text: string;
+  source: "gemini" | "rules";
+  fellBack?: boolean;
+}
+
+export async function generateRationale(
+  d: DecisionPackage,
+  applicantName: string,
+): Promise<RationaleResult> {
+  const grounded = buildRationale(d, applicantName);
+  if (!llmConfigured()) return { text: grounded, source: "rules" };
+
+  try {
+    const figures = {
+      outcome: d.outcomeLabel,
+      netMonthlyIncome: d.income.monthlyNet,
+      livingAllowance: d.haushalt.livingAllowance,
+      rent: d.haushalt.rent,
+      existingObligations: d.haushalt.obligations,
+      availableIncome: d.haushalt.available,
+      proposedInstalment: d.instalment,
+      affordabilityBuffer: d.product.affordabilityBuffer,
+      dti: Number((d.dti * 100).toFixed(1)),
+      maxDti: d.product.maxDti * 100,
+      incomeStabilityPct: Math.round(d.income.stability * 100),
+      tenureMonths: d.income.tenureMonths,
+      rules: d.rules.map((r) => ({ rule: r.label, status: r.status })),
+      conditions: d.conditions,
+      recommendedLimit: d.recommendedLimit,
+    };
+    const { text } = await generateText({
+      model: model(),
+      temperature: 0.3,
+      system:
+        "You write a short, plain-language lending decision rationale for a loan officer. " +
+        "Ground every statement strictly in the JSON figures provided. Do not invent numbers or facts. " +
+        "Do not use second-person marketing voice. 3-5 sentences. State the outcome and the key reasons.",
+      prompt: `Decision figures:\n${JSON.stringify(figures, null, 2)}`,
+    });
+    return { text: text.trim(), source: "gemini" };
+  } catch {
+    return { text: grounded, source: "rules", fellBack: true };
+  }
+}
