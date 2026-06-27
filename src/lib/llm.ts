@@ -18,10 +18,11 @@ import type { CategorisedTransaction, Transaction } from "./types";
  * deterministic rules fallback so the product degrades gracefully and always
  * says which path ran. The credit decision itself is never made by the model.
  *
- * Providers are tried in priority order per call: Gemini 2.5 Flash first, then
- * Groq (Llama 3.3 70B) if Gemini errors (e.g. a free-tier rate limit). If every
- * provider fails the caller falls back to the deterministic rules baseline. The
- * provider that actually answered is surfaced to the UI and audit trail.
+ * Providers are tried in priority order per call: Groq (GPT-OSS 120B) first for
+ * reliability, then Gemini 2.5 Flash if Groq errors. (Gemini's free tier quota-caps
+ * quickly, so it sits behind the more dependable Groq path.) If every provider fails
+ * the caller falls back to the deterministic rules baseline. The provider that
+ * actually answered is surfaced to the UI and audit trail.
  */
 
 const GEMINI_MODEL_ID = "gemini-2.5-flash";
@@ -44,15 +45,16 @@ let providersCache: Provider[] | undefined;
 function providers(): Provider[] {
   if (providersCache) return providersCache;
   const chain: Provider[] = [];
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    const google = createGoogleGenerativeAI({ apiKey: geminiKey });
-    chain.push({ name: "gemini", label: "Gemini 2.5 Flash", modelId: GEMINI_MODEL_ID, model: google(GEMINI_MODEL_ID) });
-  }
+  // Groq first: reliable + fast, and unaffected by Gemini's free-tier quota caps.
   const groqKey = process.env.GROQ_API_KEY;
   if (groqKey) {
     const groq = createGroq({ apiKey: groqKey });
     chain.push({ name: "groq", label: "GPT-OSS 120B (Groq)", modelId: GROQ_MODEL_ID, model: groq(GROQ_MODEL_ID) });
+  }
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    const google = createGoogleGenerativeAI({ apiKey: geminiKey });
+    chain.push({ name: "gemini", label: "Gemini 2.5 Flash", modelId: GEMINI_MODEL_ID, model: google(GEMINI_MODEL_ID) });
   }
   providersCache = chain;
   return chain;
