@@ -78,27 +78,39 @@ function seedSubmittedAt(index: number): string {
   return new Date(Date.UTC(2026, 5, 2 + index * 3, 9, 0, 0)).toISOString();
 }
 
-/** The 6 seeded personas as already-decided portfolio applications. */
-export async function getSeedApplications(): Promise<AppListItem[]> {
+/**
+ * The seeded personas as already-decided portfolio applications. A session-
+ * scoped officer override (recorded against the seed app id) wins over the
+ * engine outcome, so the list and the detail view stay in sync.
+ */
+export async function getSeedApplications(sessionId: string): Promise<AppListItem[]> {
   const personas = listPersonas();
+  const store = getStore();
   return Promise.all(
     personas.map(async (p, i) => {
-      const d = await getDecision(p.id, p.request, "seed");
+      const appId = seedId(p.id);
+      const [d, officer] = await Promise.all([
+        getDecision(p.id, p.request, "seed"),
+        store.latestDecision(sessionId, appId),
+      ]);
+      const override = officer && officer.decidedBy === "officer" ? officer : null;
+      const outcome = override ? override.outcome : d.outcome;
+      const outcomeLabel = override ? override.outcomeLabel : d.outcomeLabel;
       return {
-        id: seedId(p.id),
+        id: appId,
         personaId: p.id,
         applicantName: p.name,
         request: p.request,
-        status: outcomeToStatus(d.outcome),
+        status: outcomeToStatus(outcome),
         source: "seed" as const,
         submittedAt: seedSubmittedAt(i),
         isSeed: true,
-        outcome: d.outcome,
-        outcomeLabel: d.outcomeLabel,
+        outcome,
+        outcomeLabel,
         available: d.haushalt.available,
         dti: d.dti,
         monthlyNet: d.income.monthlyNet,
-        recommendedLimit: d.recommendedLimit,
+        recommendedLimit: override ? override.recommendedLimit : d.recommendedLimit,
       };
     }),
   );
@@ -133,7 +145,7 @@ async function sessionAppToItem(a: AppRecord): Promise<AppListItem> {
 export async function getConsoleApplications(sessionId: string): Promise<AppListItem[]> {
   const store = getStore();
   const [seed, session] = await Promise.all([
-    getSeedApplications(),
+    getSeedApplications(sessionId),
     store.listApplications(sessionId),
   ]);
   const sessionItems = await Promise.all(session.map(sessionAppToItem));

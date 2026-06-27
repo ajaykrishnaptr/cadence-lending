@@ -134,7 +134,7 @@ export default function Home() {
             href="/console"
             eyebrow="Loan officer console"
             title="Open the console"
-            body="A six-applicant portfolio with affordability badges, deep clickable explainability, the Haushaltsrechnung breakdown, and an append-only audit log."
+            body="An eight-applicant portfolio with affordability badges, deep clickable explainability, the Haushaltsrechnung breakdown, and an append-only audit log."
             cta="Enter the console"
           />
           <DoorCard
