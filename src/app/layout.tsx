@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Inter, Fraunces, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { DemoRibbon } from "@/components/demo-ribbon";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -48,7 +47,6 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <TooltipProvider>
-            <DemoRibbon />
             {children}
             <Toaster richColors position="top-right" />
           </TooltipProvider>
