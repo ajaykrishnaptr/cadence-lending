@@ -28,6 +28,7 @@ export function EvalReport({
 }) {
   const [view, setView] = useState(initial);
   const [source, setSource] = useState<"rules" | "gemini">("rules");
+  const [modelLabel, setModelLabel] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   function runLive() {
@@ -35,6 +36,7 @@ export function EvalReport({
       const res = await runLiveEvalAction();
       setView(res.view);
       setSource(res.source);
+      setModelLabel(res.model ?? null);
       if (res.fellBack || res.source === "rules") {
         const rateLimited = /quota|rate.?limit|429|resource.?exhausted/i.test(res.error ?? "");
         const description = !llmConfigured
@@ -45,10 +47,11 @@ export function EvalReport({
         toast.warning("Ran the rules baseline", { description });
       } else {
         const c = res.cache;
+        const who = res.model ?? "The live model";
         const cacheNote = c ? (c.misses === 0 ? " (all from cache — no model calls)" : ` (${c.hits} cached, ${c.misses} live)`) : "";
         const desc = res.sampled
-          ? `Gemini scored a ${res.view.total}-transaction sample of ${res.totalAvailable} labelled lines${cacheNote}.`
-          : `Gemini categorised ${res.view.total} labelled transactions${cacheNote}.`;
+          ? `${who} scored a ${res.view.total}-transaction sample of ${res.totalAvailable} labelled lines${cacheNote}.`
+          : `${who} categorised ${res.view.total} labelled transactions${cacheNote}.`;
         toast.success("Live evaluation complete", { description: desc });
       }
     });
@@ -66,7 +69,7 @@ export function EvalReport({
             <div className="flex items-center gap-2">
               <h2 className="font-heading text-lg font-semibold">Categoriser accuracy</h2>
               <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", source === "gemini" ? "bg-brand-muted text-brand ring-brand/25" : "bg-muted text-muted-foreground ring-border")}>
-                {source === "gemini" ? "Gemini 2.5 Flash" : "Rules baseline"}
+                {source === "gemini" ? (modelLabel ?? "Live model") : "Rules baseline"}
               </span>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -75,7 +78,7 @@ export function EvalReport({
           </div>
         </div>
         <Button onClick={runLive} disabled={pending} size="lg">
-          {pending ? <><Sparkles className="h-4 w-4 animate-pulse" /> Running…</> : <><Play className="h-4 w-4" /> Run evaluation (live Gemini)</>}
+          {pending ? <><Sparkles className="h-4 w-4 animate-pulse" /> Running…</> : <><Play className="h-4 w-4" /> Run evaluation (live model)</>}
         </Button>
       </div>
 

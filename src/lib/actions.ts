@@ -189,14 +189,15 @@ export async function recategoriseAction(input: { personaId: string }) {
   const sid = await getSessionId();
   const result = await getCategorised(input.personaId, "gemini");
   const cache = result.cache;
-  const cacheNote = cache ? ` (${cache.hits} from cache, ${cache.misses} live model calls; ${cache.store} cache)` : "";
+  const modelNote = result.model ? ` via ${result.model}` : "";
+  const cacheNote = cache ? ` (${cache.hits} from cache, ${cache.misses} live model calls${modelNote}; ${cache.store} cache)` : "";
   await getStore().appendAudit({
     sessionId: sid,
     applicationId: null,
     type: "categorisation.live",
-    message: `Live re-categorisation requested — ran ${result.source} categoriser on ${result.transactions.length} transactions${result.fellBack ? " (fell back from Gemini)" : cacheNote}.`,
+    message: `Live re-categorisation requested — ran ${result.source} categoriser on ${result.transactions.length} transactions${result.fellBack ? " (fell back to rules; no model available)" : cacheNote}.`,
     actor: "officer",
-    meta: { source: result.source, fellBack: result.fellBack ?? false, error: result.error ?? null, cache: cache ?? null },
+    meta: { source: result.source, fellBack: result.fellBack ?? false, error: result.error ?? null, cache: cache ?? null, model: result.model ?? null },
   });
   return {
     ok: true as const,
@@ -204,6 +205,7 @@ export async function recategoriseAction(input: { personaId: string }) {
     fellBack: result.fellBack ?? false,
     error: result.error,
     cache: cache ?? null,
+    model: result.model ?? null,
     transactions: result.transactions,
   };
 }
@@ -221,7 +223,7 @@ export async function regenerateRationaleAction(input: {
   const decision = await getDecision(input.personaId, request, "gemini");
   const { generateRationale } = await import("./llm");
   const r = await generateRationale(decision, profile.name);
-  return { ok: true as const, rationale: r.text, source: r.source, fellBack: r.fellBack };
+  return { ok: true as const, rationale: r.text, source: r.source, fellBack: r.fellBack, model: r.model ?? null };
 }
 
 // ---- live model evaluation (Gemini over a labelled sample) ----
@@ -238,6 +240,7 @@ export async function runLiveEvalAction() {
     sampleSize: r.sampleSize ?? null,
     totalAvailable: r.totalAvailable ?? null,
     cache: r.cache ?? null,
+    model: r.model ?? null,
     view: toEvalView(r.result),
   };
 }

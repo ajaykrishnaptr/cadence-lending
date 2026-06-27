@@ -17,6 +17,8 @@ export interface CategoriseResult {
   error?: string;
   /** Present on live (gemini) runs: how many lines came from the cache vs the model. */
   cache?: CacheStats;
+  /** Provider/model that answered the live run, e.g. "Gemini 2.5 Flash". */
+  model?: string;
 }
 
 /**
@@ -29,6 +31,8 @@ export interface CategoriseResult {
 export interface LiveCategoriseOutput {
   transactions: CategorisedTransaction[];
   cache?: CacheStats;
+  /** Provider/model that answered, e.g. "Gemini 2.5 Flash" or "Llama 3.3 70B (Groq)". */
+  model?: string;
 }
 
 export type LiveCategoriser = (
@@ -55,7 +59,7 @@ export async function categorise(
     }
     try {
       const out = await liveCategoriser(txns);
-      return { transactions: out.transactions, source: "gemini", cache: out.cache };
+      return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model };
     } catch (err) {
       return {
         transactions: categoriseWithRules(txns, "rules"),

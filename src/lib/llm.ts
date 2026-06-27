@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { generateObject, generateText } from "ai";
+import { generateObject, generateText, type LanguageModel } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGroq } from "@ai-sdk/groq";
 import { CATEGORY_KEYS } from "./categories";
 import { categoriseByRules } from "./categoriser/rules";
 import { CATEGORISER_SYSTEM, CATEGORISER_FEWSHOT } from "./categoriser/prompt";
@@ -12,23 +13,83 @@ import type { EvalCase, EvalResult } from "./eval";
 import type { CategorisedTransaction, Transaction } from "./types";
 
 /**
- * LLM provider abstraction. Gemini 2.5 Flash via the Vercel AI SDK in the demo;
- * swappable for a local model in dev. The model does two jobs only —
+ * LLM provider abstraction with FAILOVER. The model does two jobs only —
  * transaction categorisation and a grounded rationale — and every call has a
- * deterministic fallback so the product degrades gracefully and always says
- * which path ran. The credit decision itself is never made by the model.
+ * deterministic rules fallback so the product degrades gracefully and always
+ * says which path ran. The credit decision itself is never made by the model.
+ *
+ * Providers are tried in priority order per call: Gemini 2.5 Flash first, then
+ * Groq (Llama 3.3 70B) if Gemini errors (e.g. a free-tier rate limit). If every
+ * provider fails the caller falls back to the deterministic rules baseline. The
+ * provider that actually answered is surfaced to the UI and audit trail.
  */
 
-const MODEL_ID = "gemini-2.5-flash";
-const apiKey = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL_ID = "gemini-2.5-flash";
+// gpt-oss-120b supports strict json_schema structured outputs on Groq (the
+// llama-3.3-70b model only does json_object, which generateObject rejects).
+const GROQ_MODEL_ID = "openai/gpt-oss-120b";
+
+interface Provider {
+  /** Short id surfaced in the UI/audit. */
+  name: "gemini" | "groq";
+  /** Human label, e.g. "Gemini 2.5 Flash". */
+  label: string;
+  modelId: string;
+  model: LanguageModel;
+}
+
+let providersCache: Provider[] | undefined;
+
+/** Built once, lazily, so dotenv-injected env (scripts/tests) is picked up. */
+function providers(): Provider[] {
+  if (providersCache) return providersCache;
+  const chain: Provider[] = [];
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    const google = createGoogleGenerativeAI({ apiKey: geminiKey });
+    chain.push({ name: "gemini", label: "Gemini 2.5 Flash", modelId: GEMINI_MODEL_ID, model: google(GEMINI_MODEL_ID) });
+  }
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    const groq = createGroq({ apiKey: groqKey });
+    chain.push({ name: "groq", label: "GPT-OSS 120B (Groq)", modelId: GROQ_MODEL_ID, model: groq(GROQ_MODEL_ID) });
+  }
+  providersCache = chain;
+  return chain;
+}
+
+export function llmConfigured(): boolean {
+  return providers().length > 0;
+}
 
 /**
- * Cap concurrent Gemini requests. The free tier is only a handful of requests
- * per minute, so firing one request per 40-transaction batch all at once
- * (e.g. ~24 at once for the full eval set) trips a 429 quota error and the
- * whole run falls back to rules. Throttling keeps bursts under the limit.
+ * Run an AI SDK call against each provider in turn, returning the first success
+ * plus which provider answered. Throws the last error only if all fail.
  */
-const GEMINI_MAX_CONCURRENCY = 3;
+async function withFailover<T>(
+  run: (model: LanguageModel) => Promise<T>,
+): Promise<{ value: T; provider: Provider }> {
+  const chain = providers();
+  if (chain.length === 0) throw new Error("No LLM provider configured (set GEMINI_API_KEY and/or GROQ_API_KEY)");
+  let lastErr: unknown;
+  for (const p of chain) {
+    try {
+      return { value: await run(p.model), provider: p };
+    } catch (err) {
+      lastErr = err;
+      // fall through to the next provider (e.g. Gemini rate-limited -> Groq)
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Cap concurrent live requests in flight. Free tiers allow only a handful of
+ * requests per minute, so firing one request per 40-transaction batch all at
+ * once (e.g. ~24 at once for the full eval set) trips a 429 and the whole run
+ * fails over / falls back. Throttling keeps bursts under the limit.
+ */
+const LLM_MAX_CONCURRENCY = 3;
 
 /** Run `fn` over `items` with at most `limit` in flight at a time. */
 async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -40,16 +101,6 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
     }
   });
   await Promise.all(workers);
-}
-
-export function llmConfigured(): boolean {
-  return Boolean(apiKey);
-}
-
-function model() {
-  if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
-  const google = createGoogleGenerativeAI({ apiKey });
-  return google(MODEL_ID);
 }
 
 // ---- categorisation ----
@@ -77,28 +128,47 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-/** Live Gemini categoriser. Throws on any failure so callers fall back to rules. */
+export interface RawCategoriseOutput {
+  transactions: CategorisedTransaction[];
+  /** Human label of the provider(s) that answered, e.g. "Gemini 2.5 Flash". */
+  modelLabel?: string;
+  /** Single model id when one provider answered (cache provenance); "mixed" otherwise. */
+  modelId?: string;
+}
+
+/**
+ * Live categoriser with provider failover. Each batch tries Gemini then Groq;
+ * throws only if every provider fails (so callers fall back to rules). Reports
+ * which provider(s) actually answered.
+ */
 export async function categoriseWithGemini(
   txns: Transaction[],
-): Promise<CategorisedTransaction[]> {
-  const m = model();
+): Promise<RawCategoriseOutput> {
   const out: CategorisedTransaction[] = new Array(txns.length);
+  const usedNames = new Set<string>();
+  const usedLabels = new Set<string>();
+  let lastModelId: string | undefined;
 
   await mapLimit(
     chunk(txns.map((t, i) => ({ t, i })), 40),
-    GEMINI_MAX_CONCURRENCY,
+    LLM_MAX_CONCURRENCY,
     async (group) => {
       const lines = group
         .map(({ t, i }) => `${i}: "${t.description}" amount ${t.amount.toFixed(2)} EUR (${t.direction})`)
         .join("\n");
-      const { object } = await generateObject({
-        model: m,
-        schema: categorySchema,
-        temperature: 0.1,
-        system: SYSTEM,
-        prompt: `${FEW_SHOT}\n\nCategorise these ${group.length} transactions:\n${lines}`,
-      });
-      const byIndex = new Map(object.items.map((it) => [it.index, it]));
+      const { value, provider } = await withFailover((m) =>
+        generateObject({
+          model: m,
+          schema: categorySchema,
+          temperature: 0.1,
+          system: SYSTEM,
+          prompt: `${FEW_SHOT}\n\nCategorise these ${group.length} transactions:\n${lines}`,
+        }),
+      );
+      usedNames.add(provider.name);
+      usedLabels.add(provider.label);
+      lastModelId = provider.modelId;
+      const byIndex = new Map(value.object.items.map((it) => [it.index, it]));
       for (const { t, i } of group) {
         const r = byIndex.get(i);
         out[i] = r
@@ -119,7 +189,11 @@ export async function categoriseWithGemini(
     },
   );
 
-  return out;
+  return {
+    transactions: out,
+    modelLabel: usedLabels.size ? [...usedLabels].join(" + ") : undefined,
+    modelId: usedNames.size === 1 ? lastModelId : usedNames.size > 1 ? "mixed" : undefined,
+  };
 }
 
 /**
@@ -146,21 +220,24 @@ export async function categoriseWithGeminiCached(
     else misses.push({ t, i });
   });
 
+  let modelLabel: string | undefined;
   if (misses.length) {
     const fresh = await categoriseWithGemini(misses.map((m) => m.t));
+    modelLabel = fresh.modelLabel;
     const toPersist: { key: string; categorisation: CategorisedTransaction["categorisation"] }[] = [];
-    fresh.forEach((cat, j) => {
+    fresh.transactions.forEach((cat, j) => {
       const { i } = misses[j];
       out[i] = cat;
       // only persist real model outputs, never per-line rules fallbacks
       if (cat.source === "gemini") toPersist.push({ key: keys[i], categorisation: cat.categorisation });
     });
-    if (toPersist.length) await cache.putMany(toPersist, MODEL_ID);
+    if (toPersist.length) await cache.putMany(toPersist, fresh.modelId ?? "live");
   }
 
   return {
     transactions: out,
     cache: { hits: txns.length - misses.length, misses: misses.length, store: cache.kind },
+    model: modelLabel,
   };
 }
 
@@ -199,6 +276,8 @@ export interface LiveEvalResult {
   sampleSize?: number;
   totalAvailable?: number;
   cache?: CacheStats;
+  /** Provider/model that answered, e.g. "Gemini 2.5 Flash" or "Llama 3.3 70B (Groq)". */
+  model?: string;
 }
 
 export async function evaluateWithGemini(): Promise<LiveEvalResult> {
@@ -209,7 +288,7 @@ export async function evaluateWithGemini(): Promise<LiveEvalResult> {
   const all = getEvalCases();
   const sample = sampleEvalCases(all, LIVE_EVAL_SAMPLE);
   try {
-    const { transactions, cache } = await categoriseWithGeminiCached(sample.map((c) => c.transaction));
+    const { transactions, cache, model } = await categoriseWithGeminiCached(sample.map((c) => c.transaction));
     const result = scoreCases(sample, transactions.map((t) => t.categorisation));
     return {
       result,
@@ -218,6 +297,7 @@ export async function evaluateWithGemini(): Promise<LiveEvalResult> {
       sampleSize: sample.length,
       totalAvailable: all.length,
       cache,
+      model,
     };
   } catch (err) {
     return {
@@ -235,6 +315,8 @@ export interface RationaleResult {
   text: string;
   source: "gemini" | "rules";
   fellBack?: boolean;
+  /** Provider/model that answered (live path only). */
+  model?: string;
 }
 
 export async function generateRationale(
@@ -262,16 +344,18 @@ export async function generateRationale(
       conditions: d.conditions,
       recommendedLimit: d.recommendedLimit,
     };
-    const { text } = await generateText({
-      model: model(),
-      temperature: 0.3,
-      system:
-        "You write a short, plain-language lending decision rationale for a loan officer. " +
-        "Ground every statement strictly in the JSON figures provided. Do not invent numbers or facts. " +
-        "Do not use second-person marketing voice. 3-5 sentences. State the outcome and the key reasons.",
-      prompt: `Decision figures:\n${JSON.stringify(figures, null, 2)}`,
-    });
-    return { text: text.trim(), source: "gemini" };
+    const { value, provider } = await withFailover((m) =>
+      generateText({
+        model: m,
+        temperature: 0.3,
+        system:
+          "You write a short, plain-language lending decision rationale for a loan officer. " +
+          "Ground every statement strictly in the JSON figures provided. Do not invent numbers or facts. " +
+          "Do not use second-person marketing voice. 3-5 sentences. State the outcome and the key reasons.",
+        prompt: `Decision figures:\n${JSON.stringify(figures, null, 2)}`,
+      }),
+    );
+    return { text: value.text.trim(), source: "gemini", model: provider.label };
   } catch {
     return { text: grounded, source: "rules", fellBack: true };
   }

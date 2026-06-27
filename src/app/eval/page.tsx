@@ -7,7 +7,7 @@ export const metadata = { title: "Model evaluation — Cadence" };
 
 export default function EvalPage() {
   const view = toEvalView(baselineEval());
-  const llmConfigured = Boolean(process.env.GEMINI_API_KEY);
+  const llmConfigured = Boolean(process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY);
 
   return (
     <div className="flex min-h-screen flex-col">

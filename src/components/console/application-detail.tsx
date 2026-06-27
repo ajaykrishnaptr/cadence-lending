@@ -346,6 +346,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailProps["decision"]; personaId: string; withdrawn: Set<string> }) {
   const [txns, setTxns] = useState<CategorisedTransaction[]>(decision.transactions);
   const [source, setSource] = useState<CategoriserSource>(decision.categoriserSource);
+  const [liveModel, setLiveModel] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [filter, setFilter] = useState<string>("all");
 
@@ -364,15 +365,17 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
       if (res.ok) {
         setTxns(res.transactions as CategorisedTransaction[]);
         setSource(res.source);
-        if (res.fellBack) toast.warning("Fell back to rules baseline", { description: res.error ?? "Live model unavailable — using the deterministic categoriser." });
+        setLiveModel(res.model ?? null);
+        if (res.fellBack) toast.warning("Fell back to rules baseline", { description: res.error ?? "No live model available — using the deterministic categoriser." });
         else {
           const c = res.cache;
+          const via = res.model ? ` via ${res.model}` : "";
           const desc = c
             ? c.misses === 0
               ? `All ${res.transactions.length} lines served from the ${c.store} cache — zero model calls.`
-              : `${res.transactions.length} relabelled · ${c.hits} from cache, ${c.misses} live model call${c.misses > 1 ? "s" : ""}.`
-            : `${res.transactions.length} transactions relabelled.`;
-          toast.success("Re-categorised with live Gemini", { description: desc });
+              : `${res.transactions.length} relabelled · ${c.hits} from cache, ${c.misses} live model call${c.misses > 1 ? "s" : ""}${via}.`
+            : `${res.transactions.length} transactions relabelled${via}.`;
+          toast.success(`Re-categorised${res.model ? ` with ${res.model}` : " live"}`, { description: desc });
         }
       } else {
         toast.error("Re-categorisation failed");
@@ -388,12 +391,12 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Categoriser:</span>
           <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", source === "gemini" ? "bg-brand-muted text-brand ring-brand/25" : "bg-muted text-muted-foreground ring-border")}>
-            {source === "gemini" ? "Gemini 2.5 Flash (live)" : source === "rules" ? "Rules baseline" : "Pre-computed"}
+            {source === "gemini" ? `${liveModel ?? "Live model"} (live)` : source === "rules" ? "Rules baseline" : "Pre-computed"}
           </span>
           <span className="text-xs text-muted-foreground">{txns.length} lines</span>
         </div>
         <Button size="sm" variant="outline" onClick={recategorise} disabled={pending}>
-          <Wand2 className={cn("h-3.5 w-3.5", pending && "animate-pulse")} /> {pending ? "Categorising…" : "Re-categorise (live Gemini)"}
+          <Wand2 className={cn("h-3.5 w-3.5", pending && "animate-pulse")} /> {pending ? "Categorising…" : "Re-categorise (live model)"}
         </Button>
       </div>
 
