@@ -38,8 +38,14 @@ export interface AisTransactionsResult {
 
 export interface AisProvider {
   readonly name: string;
-  getAccounts(accountHolder: string): Promise<AisAccountsResult>;
-  getTransactions(accountHolder: string): Promise<AisTransactionsResult>;
+  /** `banks` restricts the fan-out to the connected ASPSPs (default: all the persona's). */
+  getAccounts(accountHolder: string, banks?: string[]): Promise<AisAccountsResult>;
+  getTransactions(accountHolder: string, banks?: string[]): Promise<AisTransactionsResult>;
+}
+
+function resolveBanks(accountHolder: string, banksArg?: string[]): string[] {
+  const all = banksForPersona(accountHolder);
+  return banksArg ? banksArg.filter((b) => all.includes(b)) : all;
 }
 
 async function resolveBaseUrl(): Promise<string> {
@@ -85,9 +91,9 @@ class AggregatingAisProvider implements AisProvider {
     return res.json();
   }
 
-  async getAccounts(accountHolder: string): Promise<AisAccountsResult> {
+  async getAccounts(accountHolder: string, banksArg?: string[]): Promise<AisAccountsResult> {
     const base = await resolveBaseUrl();
-    const banks = banksForPersona(accountHolder);
+    const banks = resolveBanks(accountHolder, banksArg);
     const accounts: Account[] = [];
     await Promise.all(
       banks.map(async (bankId) => {
@@ -98,9 +104,9 @@ class AggregatingAisProvider implements AisProvider {
     return { aspsp: "Cadence aggregator", accountHolder, accounts };
   }
 
-  async getTransactions(accountHolder: string): Promise<AisTransactionsResult> {
+  async getTransactions(accountHolder: string, banksArg?: string[]): Promise<AisTransactionsResult> {
     const base = await resolveBaseUrl();
-    const banks = banksForPersona(accountHolder);
+    const banks = resolveBanks(accountHolder, banksArg);
 
     const transactions: Transaction[] = [];
     let balanceSeries: BalancePoint[] = [];

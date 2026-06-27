@@ -27,6 +27,8 @@ export const applications = pgTable("applications", {
   purpose: text("purpose").notNull(),
   status: text("status").notNull(), // pending | approved | referred | declined
   source: text("source").notNull(), // applicant | seed
+  /** ASPSP ids the applicant connected (null = all of the persona's banks). */
+  connectedBanks: jsonb("connected_banks"),
   submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

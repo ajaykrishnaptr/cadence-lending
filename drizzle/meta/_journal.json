@@ -15,6 +15,13 @@
       "when": 1782537870408,
       "tag": "0001_groovy_william_stryker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782538780984,
+      "tag": "0002_boring_raza",
+      "breakpoints": true
     }
   ]
 }

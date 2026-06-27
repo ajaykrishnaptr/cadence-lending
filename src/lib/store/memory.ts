@@ -63,6 +63,7 @@ export class MemoryStore implements Store {
       purpose: input.purpose,
       status: input.status ?? "pending",
       source: input.source ?? "applicant",
+      connectedBanks: input.connectedBanks ?? null,
       submittedAt: nowIso(),
     };
     state.applications.push(rec);

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ROLE_COOKIE } from "@/middleware";
 import { getSessionId } from "./session";
 import { getStore } from "./store";
-import { getProfile, banksForPersona, bankName } from "./demo-bank";
+import { getProfile, banksForPersona, bankName, detectConnectableBanks } from "./demo-bank";
 import { getDecision, getCategorised } from "./cadence";
 import "./llm"; // side-effect: registers the live Gemini categoriser
 import { outcomeToStatus } from "./cadence/applications";
@@ -43,6 +43,8 @@ export interface SubmitInput {
   termMonths: number;
   purpose: LoanPurpose;
   scope?: ConsentScope;
+  /** ASPSPs the applicant chose to connect (default: all the persona's banks). */
+  connectedBanks?: string[];
 }
 
 export async function submitApplication(input: SubmitInput) {
@@ -53,6 +55,9 @@ export async function submitApplication(input: SubmitInput) {
 
   const request = { amount: input.amount, termMonths: input.termMonths, purpose: input.purpose };
   const scope = input.scope ?? FULL_SCOPE;
+  // only the banks the applicant actually connected (intersected with what they hold)
+  const all = banksForPersona(input.personaId);
+  const banks = (input.connectedBanks?.length ? input.connectedBanks : all).filter((b) => all.includes(b));
 
   // 1. consent (180-day expiry) — decorative gating, but a real record
   const grantedAt = new Date();
@@ -68,10 +73,10 @@ export async function submitApplication(input: SubmitInput) {
     purpose: request.purpose,
     status: "pending",
     source: "applicant",
+    connectedBanks: banks,
   });
 
   // one consent per ASPSP — each bank grants access independently (PSD2)
-  const banks = banksForPersona(input.personaId);
   const grantedScopes = Object.values(scope).filter(Boolean).length;
   for (const bankId of banks) {
     await store.createConsent({
@@ -87,7 +92,7 @@ export async function submitApplication(input: SubmitInput) {
   }
 
   // 2. engine decision (records the recommendation; status stays pending for the officer)
-  const decision = await getDecision(input.personaId, request, "seed");
+  const decision = await getDecision(input.personaId, request, "seed", undefined, banks);
   await store.recordDecision({
     sessionId: sid,
     applicationId: app.id,
@@ -155,6 +160,11 @@ export async function recordOfficerDecision(input: {
   revalidatePath(`/console/applications/${input.applicationId}`);
   revalidatePath("/console");
   return { ok: true as const };
+}
+
+// ---- "connect your other bank" nudge ----
+export async function suggestBanksAction(input: { personaId: string; connectedBanks: string[] }) {
+  return { ok: true as const, suggestions: detectConnectableBanks(input.personaId, input.connectedBanks) };
 }
 
 // ---- live re-categorisation (Gemini, with rules fallback) ----

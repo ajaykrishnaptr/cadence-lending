@@ -11,6 +11,7 @@ export interface AppRecord {
   purpose: LoanPurpose;
   status: ApplicationStatus;
   source: "applicant" | "seed";
+  connectedBanks: string[] | null;
   submittedAt: string;
 }
 
@@ -62,6 +63,7 @@ export interface CreateApplicationInput {
   purpose: LoanPurpose;
   status?: ApplicationStatus;
   source?: "applicant" | "seed";
+  connectedBanks?: string[] | null;
 }
 
 export interface CreateConsentInput {

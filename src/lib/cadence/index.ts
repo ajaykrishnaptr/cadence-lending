@@ -16,20 +16,23 @@ const accountCache = new Map<string, AccountData>();
 const categoriseCache = new Map<string, CategoriseResult>();
 const decisionCache = new Map<string, DecisionPackage>();
 
+const banksKey = (banks?: string[]) => (banks ? [...banks].sort().join("+") : "all");
+
 /** Pull a persona's accounts + statement via the AIS provider (memoised). */
-export async function getAccountData(personaId: string): Promise<AccountData> {
-  const hit = accountCache.get(personaId);
+export async function getAccountData(personaId: string, banks?: string[]): Promise<AccountData> {
+  const key = `${personaId}:${banksKey(banks)}`;
+  const hit = accountCache.get(key);
   if (hit) return hit;
   const [accRes, txRes] = await Promise.all([
-    ais.getAccounts(personaId),
-    ais.getTransactions(personaId),
+    ais.getAccounts(personaId, banks),
+    ais.getTransactions(personaId, banks),
   ]);
   const data: AccountData = {
     accounts: accRes.accounts,
     balanceSeries: txRes.balanceSeries,
     accountId: txRes.accountId,
   };
-  accountCache.set(personaId, data);
+  accountCache.set(key, data);
   return data;
 }
 
@@ -37,13 +40,14 @@ export async function getAccountData(personaId: string): Promise<AccountData> {
 export async function getCategorised(
   personaId: string,
   source: CategoriserSource = "seed",
+  banks?: string[],
 ): Promise<CategoriseResult> {
-  const key = `${personaId}:${source}`;
+  const key = `${personaId}:${source}:${banksKey(banks)}`;
   if (source !== "gemini") {
     const hit = categoriseCache.get(key);
     if (hit) return hit;
   }
-  const tx = await ais.getTransactions(personaId);
+  const tx = await ais.getTransactions(personaId, banks);
   const result = await categorise(tx.transactions, source);
   if (source !== "gemini") categoriseCache.set(key, result);
   return result;
@@ -55,17 +59,18 @@ export async function getDecision(
   request: LoanRequest,
   source: CategoriserSource = "seed",
   product: ProductConfig = CONSUMER_LOAN,
+  banks?: string[],
 ): Promise<DecisionPackage & { categoriserSource: CategoriserSource; categoriserFellBack?: boolean }> {
   const profile = getProfile(personaId);
   if (!profile) throw new Error(`Unknown persona: ${personaId}`);
 
-  const key = `${personaId}:${product.id}:${request.amount}:${request.termMonths}:${request.purpose}:${source}`;
+  const key = `${personaId}:${product.id}:${request.amount}:${request.termMonths}:${request.purpose}:${source}:${banksKey(banks)}`;
   if (source !== "gemini" && decisionCache.has(key)) {
     const cached = decisionCache.get(key)!;
     return Object.assign(cached, { categoriserSource: source });
   }
 
-  const cat = await getCategorised(personaId, source);
+  const cat = await getCategorised(personaId, source, banks);
   const pkg = runDecision(cat.transactions, request, product, profile.householdSize);
   const enriched = Object.assign(pkg, {
     categoriserSource: cat.source,

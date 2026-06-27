@@ -6,12 +6,12 @@ import {
   type BgBalance,
   type BgTransaction,
 } from "../psd2";
-import { BANKS, getBank } from "./banks";
+import { BANKS, getBank, bankForIban } from "./banks";
 import { getPersonaData, type SeededTransaction } from "./generator";
-import { getProfile, listPersonas, PROFILES } from "./personas";
+import { getProfile, listPersonas, PROFILES, banksForPersona } from "./personas";
 
 export { listPersonas, PROFILES, getProfile, banksForPersona } from "./personas";
-export { BANKS, BANK_LIST, getBank, bankName, PRIMARY_BANK } from "./banks";
+export { BANKS, BANK_LIST, BANK_DIRECTORY, getBank, bankName, PRIMARY_BANK } from "./banks";
 export type { Aspsp } from "./banks";
 export type { SeededTransaction, PersonaData } from "./generator";
 export { getPersonaData } from "./generator";
@@ -82,6 +82,42 @@ export function personaExists(personaId: string): boolean {
 
 export function bankExists(bankId: string): boolean {
   return Boolean(BANKS[bankId]);
+}
+
+export interface BankSuggestion {
+  bankId: string;
+  count: number;
+  sampleIban: string;
+}
+
+/**
+ * The "connect your other bank" nudge. Scans the transactions of the ALREADY-
+ * connected banks for counterparty IBANs that resolve to another directory bank
+ * the applicant holds data at but has not connected — exactly how an aggregator
+ * infers a likely additional bank from a transfer's destination IBAN.
+ */
+export function detectConnectableBanks(
+  personaId: string,
+  connectedBankIds: string[],
+): BankSuggestion[] {
+  const data = getPersonaData(personaId);
+  if (!data) return [];
+  const accountBank = new Map(data.accounts.map((a) => [a.id, a.bankId]));
+  const personaBanks = banksForPersona(personaId);
+  const found = new Map<string, { count: number; sampleIban: string }>();
+
+  for (const t of data.transactions) {
+    if (!t.counterpartyIban) continue;
+    if (!connectedBankIds.includes(accountBank.get(t.accountId) ?? "")) continue;
+    const target = bankForIban(t.counterpartyIban);
+    if (!target || !target.hasData) continue;
+    if (connectedBankIds.includes(target.id)) continue;
+    if (!personaBanks.includes(target.id)) continue;
+    const e = found.get(target.id) ?? { count: 0, sampleIban: t.counterpartyIban };
+    e.count += 1;
+    found.set(target.id, e);
+  }
+  return [...found.entries()].map(([bankId, e]) => ({ bankId, ...e }));
 }
 
 export const ALL_PERSONA_IDS = listPersonas().map((p) => p.id);

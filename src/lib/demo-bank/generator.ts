@@ -1,5 +1,6 @@
 import { CATEGORY_META, type Category } from "../categories";
 import type { Account, GroundTruth, Transaction } from "../types";
+import { getBank, bankName } from "./banks";
 import { getProfile, type ProfileSpec } from "./personas";
 
 /**
@@ -109,6 +110,15 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
     });
   };
 
+  // German IBAN: DE + 2 check + 8 bank code + 10 account number → the bank a
+  // counterparty IBAN belongs to is derivable, which drives the connect nudge.
+  const ibanFor = (bankCode: string, salt: string) => {
+    const acct = String(hashStr(profile.id + salt)).padStart(10, "0").repeat(2).slice(0, 10);
+    const check = String((hashStr(salt) % 90) + 10);
+    return `DE${check}${bankCode}${acct}`;
+  };
+  const demoCode = getBank("demo-bank")!.bankCode;
+
   const months = monthSequence(profile.tenureMonths);
 
   for (const mr of months) {
@@ -217,6 +227,23 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
         });
       }
     }
+
+    // --- cross-bank transfer to the second ASPSP (the connect-nudge signal) ---
+    if (profile.secondBank && !mr.latest) {
+      const sb = profile.secondBank;
+      const day = clampDay(profile.salary.day + 2);
+      if (day <= cutoff) {
+        const otherIban = ibanFor(getBank(sb.bankId)!.bankCode, `${sb.bankId}-0`);
+        add({
+          bookingDate: iso(mr.year, mr.month, day),
+          amount: round2(-range(120, 240)),
+          description: `Übertrag an ${bankName(sb.bankId)} ${sb.accounts[0].name}`,
+          counterparty: bankName(sb.bankId),
+          counterpartyIban: otherIban,
+          truth: truthFor("transfer", { isRecurring: true }),
+        });
+      }
+    }
   }
 
   // sort chronologically and accrue a running balance from the opening balance
@@ -230,22 +257,13 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
   });
   const closingBalance = running;
 
-  const ibanFor = (salt: string) => {
-    const digits = String(hashStr(profile.id + salt))
-      .padStart(10, "0")
-      .repeat(2)
-      .slice(0, 18);
-    const check = String((hashStr(salt) % 90) + 10);
-    return `DE${check}${digits}`;
-  };
-
   const accounts: Account[] = [
     {
       id: checkingId,
       bankId: "demo-bank",
       type: "checking",
       name: "Girokonto",
-      iban: ibanFor("chk"),
+      iban: ibanFor(demoCode, "chk"),
       balance: closingBalance,
       currency: "EUR",
     },
@@ -254,7 +272,7 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
       bankId: "demo-bank",
       type: "savings",
       name: "Tagesgeld Sparen",
-      iban: ibanFor("sav"),
+      iban: ibanFor(demoCode, "sav"),
       balance: round2(profile.savingsBalance),
       currency: "EUR",
     },
@@ -271,7 +289,7 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
           bankId,
           type: "savings",
           name: spec.name,
-          iban: ibanFor(`${bankId}-${ai}`),
+          iban: ibanFor(getBank(bankId)!.bankCode, `${bankId}-${ai}`),
           balance: round2(spec.balance),
           currency: "EUR",
         });
@@ -329,7 +347,7 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
         bankId,
         type: "checking",
         name: spec.name,
-        iban: ibanFor(`${bankId}-${ai}`),
+        iban: ibanFor(getBank(bankId)!.bankCode, `${bankId}-${ai}`),
         balance: arun,
         currency: "EUR",
       });

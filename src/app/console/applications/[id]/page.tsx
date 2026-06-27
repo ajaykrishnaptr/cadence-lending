@@ -20,9 +20,10 @@ export default async function ApplicationDetailPage({
   const profile = getProfile(resolved.personaId);
   if (!profile) notFound();
 
+  const banks = resolved.connectedBanks ?? undefined;
   const [decision, accountData, consents] = await Promise.all([
-    getDecision(resolved.personaId, resolved.request, "seed"),
-    getAccountData(resolved.personaId),
+    getDecision(resolved.personaId, resolved.request, "seed", undefined, banks),
+    getAccountData(resolved.personaId, banks),
     getConsentViews(sid, resolved),
   ]);
 

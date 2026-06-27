@@ -1,0 +1,1 @@
+ALTER TABLE "applications" ADD COLUMN "connected_banks" jsonb;

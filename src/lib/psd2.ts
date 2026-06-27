@@ -143,8 +143,8 @@ export function serializeTransaction(t: SeededTransaction): BgTransaction {
     transactionAmount: bgAmount(t.amount),
     // counterparty side depends on flow direction
     ...(isCredit
-      ? { debtorName: counterparty }
-      : { creditorName: counterparty }),
+      ? { debtorName: counterparty, ...(t.counterpartyIban ? { debtorAccount: { iban: t.counterpartyIban } } : {}) }
+      : { creditorName: counterparty, ...(t.counterpartyIban ? { creditorAccount: { iban: t.counterpartyIban } } : {}) }),
     remittanceInformationUnstructured: t.description,
     proprietaryBankTransactionCode: isCredit ? "CRDT" : "DBIT",
     balanceAfterTransaction: bgAmount(t.balance),
@@ -175,6 +175,7 @@ export function parseBgTransaction(
 ): Transaction & { balanceAfter?: number } {
   const amount = Number(bg.transactionAmount.amount);
   const counterparty = bg.creditorName || bg.debtorName || undefined;
+  const counterpartyIban = bg.creditorAccount?.iban || bg.debtorAccount?.iban || undefined;
   const remittance = bg.remittanceInformationUnstructured ?? "";
   // Cadence reconstructs the working description from the raw fields it received.
   const description = remittance || counterparty || "Transaction";
@@ -186,6 +187,7 @@ export function parseBgTransaction(
     currency: "EUR",
     description,
     counterparty,
+    counterpartyIban,
     direction: amount >= 0 ? "credit" : "debit",
     bankId,
     balanceAfter: bg.balanceAfterTransaction

@@ -13,21 +13,27 @@ import {
   Loader2,
   CalendarClock,
   CheckCircle2,
+  Landmark,
+  Plus,
+  Search,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { PersonaProfile, LoanPurpose, ConsentScope } from "@/lib/types";
+import type { BankSuggestion } from "@/lib/demo-bank";
+import { BANK_DIRECTORY, bankName, getBank } from "@/lib/demo-bank/banks";
 import { CONSUMER_LOAN, monthlyInstalment } from "@/lib/engine/config";
-import { formatEUR } from "@/lib/format";
+import { formatEUR, maskIban } from "@/lib/format";
 import { purposeLabel, PURPOSE_LABELS } from "@/lib/labels";
-import { submitApplication, loginAs } from "@/lib/actions";
-import { bankName } from "@/lib/demo-bank/banks";
+import { submitApplication, loginAs, suggestBanksAction } from "@/lib/actions";
 import { CadenceMark } from "@/components/cadence-logo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["Offer", "Consent", "Connect", "Done"];
+const STEPS = ["Offer", "Banks", "Consent", "Done"];
 const PURPOSES = Object.keys(PURPOSE_LABELS) as LoanPurpose[];
 const SCOPE_LABELS: Record<keyof ConsentScope, string> = {
   accounts: "Account list & details",
@@ -46,8 +52,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
   const [term, setTerm] = useState(persona.request.termMonths);
   const [purpose, setPurpose] = useState<LoanPurpose>(persona.request.purpose);
   const [scope, setScope] = useState<ConsentScope>({ accounts: true, balances: true, transactions: true, standingOrders: true });
-
-  const [connectState, setConnectState] = useState<"login" | "sca" | "pulling">("login");
+  const [connected, setConnected] = useState<string[]>([]);
   const [resultAppId, setResultAppId] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -57,6 +62,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
     setAmount(p.request.amount);
     setTerm(p.request.termMonths);
     setPurpose(p.request.purpose);
+    setConnected([]);
   }
 
   const instalment = useMemo(() => monthlyInstalment(amount, CONSUMER_LOAN.apr, term), [amount, term]);
@@ -68,10 +74,9 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
 
   function submit() {
     start(async () => {
-      const res = await submitApplication({ personaId, amount, termMonths: term, purpose, scope });
+      const res = await submitApplication({ personaId, amount, termMonths: term, purpose, scope, connectedBanks: connected });
       if (!res.ok) {
         toast.error(res.error ?? "Submission failed");
-        setConnectState("login");
         return;
       }
       setResultAppId(res.applicationId);
@@ -108,30 +113,29 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
       )}
 
       {step === 2 && (
-        <ConsentStep
-          scope={scope}
-          setScope={setScope}
-          expiry={expiry}
-          banks={persona.banks}
+        <BanksStep
+          persona={persona}
+          connected={connected}
+          setConnected={setConnected}
           onBack={() => setStep(1)}
-          onGrant={() => setStep(3)}
+          onNext={() => setStep(3)}
         />
       )}
 
       {step === 3 && (
-        <ConnectStep
-          persona={persona}
-          banks={persona.banks}
-          state={connectState}
-          setState={setConnectState}
+        <ConsentStep
+          scope={scope}
+          setScope={setScope}
+          expiry={expiry}
+          banks={connected}
           pending={pending}
-          onAuthorise={submit}
           onBack={() => setStep(2)}
+          onGrant={submit}
         />
       )}
 
       {step === 4 && (
-        <DoneStep persona={persona} amount={amount} term={term} purpose={purpose} onConsole={openConsole} pending={pending} />
+        <DoneStep persona={persona} amount={amount} term={term} purpose={purpose} banks={connected} onConsole={openConsole} pending={pending} />
       )}
     </div>
   );
@@ -188,11 +192,14 @@ function OfferStep(props: {
 
       <Card>
         <h2 className="font-heading text-lg font-semibold">Who are you applying as?</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Pick a synthetic applicant to embody for the demo. Their Demo Bank history drives the decision.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Pick a synthetic applicant to embody for the demo. Their bank history drives the decision.</p>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {props.personas.map((p) => (
             <button key={p.id} onClick={() => props.choosePersona(p.id)} className={cn("rounded-xl border p-3 text-left transition-all", props.personaId === p.id ? "border-warm bg-warm-muted/40 ring-1 ring-warm/30" : "hover:border-warm/30")}>
-              <div className="text-sm font-medium">{p.name}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">{p.name}</div>
+                {p.banks.length > 1 && <span className="rounded-full bg-brand-muted px-1.5 py-0.5 text-[10px] font-medium text-brand">{p.banks.length} banks</span>}
+              </div>
               <div className="text-xs text-muted-foreground">{p.tagline}</div>
             </button>
           ))}
@@ -235,15 +242,172 @@ function OfferStep(props: {
           </div>
         </div>
         <Button className="mt-6 w-full" size="lg" onClick={props.onNext}>
-          Continue to consent <ArrowRight className="h-4 w-4" />
+          Continue to bank connection <ArrowRight className="h-4 w-4" />
         </Button>
       </Card>
     </div>
   );
 }
 
-// ---- Step 2: Consent ----
-function ConsentStep({ scope, setScope, expiry, banks, onBack, onGrant }: { scope: ConsentScope; setScope: (s: ConsentScope) => void; expiry: Date; banks: string[]; onBack: () => void; onGrant: () => void }) {
+// ---- Step 2: Banks (picker + per-bank connect + IBAN nudge) ----
+function BanksStep({ persona, connected, setConnected, onBack, onNext }: {
+  persona: PersonaProfile;
+  connected: string[];
+  setConnected: (b: string[]) => void;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const [authorising, setAuthorising] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<BankSuggestion[]>([]);
+  const [showDir, setShowDir] = useState(false);
+  const [query, setQuery] = useState("");
+  const [, startSuggest] = useTransition();
+  const primary = persona.banks[0];
+
+  function refreshSuggestions(conn: string[]) {
+    startSuggest(async () => {
+      const res = await suggestBanksAction({ personaId: persona.id, connectedBanks: conn });
+      setSuggestions(res.suggestions);
+    });
+  }
+
+  function connectBank(bankId: string) {
+    if (connected.includes(bankId) || authorising) return;
+    setAuthorising(bankId);
+    // simulated redirect + SCA
+    setTimeout(() => {
+      const next = [...connected, bankId];
+      setConnected(next);
+      setAuthorising(null);
+      setShowDir(false);
+      setQuery("");
+      refreshSuggestions(next);
+    }, 950);
+  }
+
+  const directory = BANK_DIRECTORY.filter(
+    (b) => !connected.includes(b.id) && b.name.toLowerCase().includes(query.toLowerCase()),
+  );
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><Landmark className="h-5 w-5" /></span>
+        <div>
+          <h2 className="font-heading text-lg font-semibold">Connect your banks</h2>
+          <p className="text-sm text-muted-foreground">Cadence aggregates across every bank you connect. There&apos;s no central lookup of where you bank — you choose.</p>
+        </div>
+      </div>
+
+      {/* Primary bank (from the lead) */}
+      {!connected.includes(primary) && (
+        <div className="mt-5 flex items-center justify-between rounded-xl border bg-muted/30 p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background"><Building2 className="h-4 w-4" /></span>
+            <div>
+              <div className="text-sm font-medium">{bankName(primary)}</div>
+              <div className="text-xs text-muted-foreground">Your application came through this bank</div>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => connectBank(primary)} disabled={!!authorising}>
+            {authorising === primary ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Authorising…</> : "Connect"}
+          </Button>
+        </div>
+      )}
+
+      {/* Connected banks */}
+      {connected.length > 0 && (
+        <div className="mt-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Connected</p>
+          <div className="mt-2 space-y-2">
+            {connected.map((b) => {
+              const bank = getBank(b);
+              const hasData = bank?.hasData ?? false;
+              return (
+                <div key={b} className="flex items-center justify-between rounded-xl border border-success/30 bg-success-muted/40 p-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-success text-success-foreground"><Check className="h-4 w-4" /></span>
+                    <div>
+                      <div className="text-sm font-medium">{bankName(b)}</div>
+                      <div className="text-[11px] text-muted-foreground">{hasData ? "Accounts retrieved · SCA confirmed" : "No accounts found at this bank"}</div>
+                    </div>
+                  </div>
+                  <ShieldCheck className="h-4 w-4 text-success" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* IBAN-based nudge */}
+      {suggestions.map((s) => (
+        <div key={s.bankId} className="mt-4 rounded-xl border border-brand/30 bg-brand-muted/40 p-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">We spotted another bank in your transactions</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {s.count} regular payment{s.count > 1 ? "s" : ""} to an account at <span className="font-medium text-foreground">{bankName(s.bankId)}</span> ({maskIban(s.sampleIban)}). Connect it for a complete affordability picture.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" onClick={() => connectBank(s.bankId)} disabled={!!authorising}>
+                  {authorising === s.bankId ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Authorising…</> : <>Connect {bankName(s.bankId)}</>}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSuggestions((prev) => prev.filter((x) => x.bankId !== s.bankId))}>Not now</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Manual add from the directory */}
+      {connected.length > 0 && (
+        <div className="mt-4">
+          {!showDir ? (
+            <Button variant="outline" size="sm" onClick={() => setShowDir(true)} disabled={!!authorising}>
+              <Plus className="h-3.5 w-3.5" /> Add another bank
+            </Button>
+          ) : (
+            <div className="rounded-xl border p-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the bank directory…" className="pl-8" />
+              </div>
+              <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+                {directory.map((b) => (
+                  <button key={b.id} onClick={() => connectBank(b.id)} disabled={!!authorising} className="flex w-full items-center justify-between rounded-lg p-2 text-left transition-colors hover:bg-muted disabled:opacity-50">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted text-muted-foreground"><Landmark className="h-3.5 w-3.5" /></span>
+                      <div>
+                        <div className="text-sm font-medium">{b.name}</div>
+                        <div className="text-[11px] text-muted-foreground">{b.kind} · {b.bic}</div>
+                      </div>
+                    </div>
+                    {authorising === b.id ? <Loader2 className="h-4 w-4 animate-spin text-brand" /> : <Plus className="h-4 w-4 text-muted-foreground" />}
+                  </button>
+                ))}
+                {directory.length === 0 && <p className="p-2 text-xs text-muted-foreground">No banks match.</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <p className="mt-4 text-xs text-muted-foreground">Each bank authorises independently with its own SCA and consent. Connecting more banks gives a fuller, more accurate affordability assessment.</p>
+
+      <div className="mt-5 flex gap-2">
+        <Button variant="outline" className="w-28" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
+        <Button className="flex-1" disabled={connected.length === 0 || !!authorising} onClick={onNext}>
+          Continue to consent <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ---- Step 3: Consent ----
+function ConsentStep({ scope, setScope, expiry, banks, pending, onBack, onGrant }: { scope: ConsentScope; setScope: (s: ConsentScope) => void; expiry: Date; banks: string[]; pending: boolean; onBack: () => void; onGrant: () => void }) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const expiryStr = `${expiry.getUTCDate()} ${months[expiry.getUTCMonth()]} ${expiry.getUTCFullYear()}`;
   const anyScope = Object.values(scope).some(Boolean);
@@ -255,7 +419,7 @@ function ConsentStep({ scope, setScope, expiry, banks, onBack, onGrant }: { scop
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><ShieldCheck className="h-5 w-5" /></span>
         <div>
           <h2 className="font-heading text-lg font-semibold">Account information consent</h2>
-          <p className="text-sm text-muted-foreground">Cadence is requesting read-only access to your accounts at {banks.map(bankName).join(" and ")}.</p>
+          <p className="text-sm text-muted-foreground">Grant Cadence read-only access at {banks.map(bankName).join(" and ")}. One consent per bank.</p>
         </div>
       </div>
 
@@ -272,7 +436,7 @@ function ConsentStep({ scope, setScope, expiry, banks, onBack, onGrant }: { scop
         </div>
       </div>
       {multi && (
-        <p className="mt-2 text-xs text-brand">Multibanking: Cadence aggregates across all {banks.length} of your banks for a complete affordability picture.</p>
+        <p className="mt-2 text-xs text-brand">Multibanking: a separate 180-day consent is recorded for each of your {banks.length} banks.</p>
       )}
 
       <div className="mt-5 space-y-1">
@@ -286,16 +450,18 @@ function ConsentStep({ scope, setScope, expiry, banks, onBack, onGrant }: { scop
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Info icon={<CalendarClock className="h-4 w-4" />} title="Retention & expiry" body={`Consent lasts 180 days, expiring ${expiryStr}. You can withdraw it at any time.`} />
+        <Info icon={<CalendarClock className="h-4 w-4" />} title="Retention & expiry" body={`Each consent lasts 180 days, expiring ${expiryStr}. You can withdraw any bank at any time.`} />
         <Info icon={<Lock className="h-4 w-4" />} title="Purpose" body="A one-off creditworthiness assessment for this loan application. Read-only — no payments can be made." />
       </div>
 
-      <p className="mt-4 text-xs text-muted-foreground">In this demo, consent is recorded for realism. It does not truly gate the underlying synthetic data, and withdrawing it flips the console to a “data hidden” state.</p>
+      <p className="mt-4 text-xs text-muted-foreground">In this demo, consent is recorded for realism. It does not truly gate the underlying synthetic data, and withdrawing a bank flips that bank to a “data hidden” state.</p>
 
       <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-        <Button variant="outline" className="sm:w-32" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
-        <Button variant="ghost" className="sm:flex-1" onClick={() => toast.message("Consent declined", { description: "Without account access, no data-driven decision can be made." })}>Decline</Button>
-        <Button className="sm:flex-1" disabled={!anyScope} onClick={onGrant}>Grant access <ShieldCheck className="h-4 w-4" /></Button>
+        <Button variant="outline" className="sm:w-32" onClick={onBack} disabled={pending}><ArrowLeft className="h-4 w-4" /> Back</Button>
+        <Button variant="ghost" className="sm:flex-1" disabled={pending} onClick={() => toast.message("Consent declined", { description: "Without account access, no data-driven decision can be made." })}>Decline</Button>
+        <Button className="sm:flex-1" disabled={!anyScope || pending} onClick={onGrant}>
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Granting & retrieving…</> : <>Grant access &amp; submit <ShieldCheck className="h-4 w-4" /></>}
+        </Button>
       </div>
     </Card>
   );
@@ -310,83 +476,8 @@ function Info({ icon, title, body }: { icon: React.ReactNode; title: string; bod
   );
 }
 
-// ---- Step 3: Connect (Demo Bank) ----
-function ConnectStep({ persona, banks, state, setState, pending, onAuthorise, onBack }: { persona: PersonaProfile; banks: string[]; state: "login" | "sca" | "pulling"; setState: (s: "login" | "sca" | "pulling") => void; pending: boolean; onAuthorise: () => void; onBack: () => void }) {
-  const primary = banks[0];
-  const multi = banks.length > 1;
-  return (
-    <Card className="border-foreground/15 bg-gradient-to-b from-foreground/[0.03] to-transparent">
-      <div className="flex items-center gap-3 border-b pb-4">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground text-background"><Building2 className="h-5 w-5" /></span>
-        <div>
-          <h2 className="font-heading text-lg font-semibold">{bankName(primary)} — secure sign-in</h2>
-          <p className="text-xs text-muted-foreground">You have been redirected to your bank to authorise access. Cadence never sees your credentials.</p>
-        </div>
-      </div>
-      {multi && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-2.5 text-xs">
-          <span className="text-muted-foreground">Banks to connect:</span>
-          {banks.map((b, i) => (
-            <span key={b} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ring-1 ring-inset", state === "pulling" || i === 0 ? "bg-success-muted text-success-foreground ring-success/30" : "bg-card text-muted-foreground ring-border")}>
-              {(state === "pulling" || i === 0) && <Check className="h-3 w-3" />}
-              {bankName(b)}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {state === "login" && (
-        <div className="mt-5 space-y-4">
-          <Field label="Online banking ID" value={persona.name.toLowerCase().replace(/\s+/g, ".") + "@demo.bank"} />
-          <Field label="PIN" value="••••••" mono />
-          <p className="text-xs text-muted-foreground">Synthetic credentials, pre-filled for the demo.</p>
-          <div className="flex gap-2">
-            <Button variant="outline" className="w-28" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
-            <Button className="flex-1" onClick={() => setState("sca")}>Log in to Demo Bank <ArrowRight className="h-4 w-4" /></Button>
-          </div>
-        </div>
-      )}
-
-      {state === "sca" && (
-        <div className="mt-5 space-y-4">
-          <div className="rounded-xl border bg-muted/30 p-4">
-            <p className="text-sm font-medium">Strong customer authentication</p>
-            <p className="mt-1 text-xs text-muted-foreground">A push notification was sent to your Demo Bank app. Enter the 6-digit code to confirm.</p>
-            <div className="mt-3 flex gap-2">
-              {"123456".split("").map((d, i) => (
-                <div key={i} className="flex h-10 w-9 items-center justify-center rounded-lg border bg-card font-mono text-lg tabular-nums">{d}</div>
-              ))}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" className="w-28" onClick={() => setState("login")}><ArrowLeft className="h-4 w-4" /> Back</Button>
-            <Button className="flex-1" onClick={() => { setState("pulling"); onAuthorise(); }} disabled={pending}>Confirm &amp; authorise <ShieldCheck className="h-4 w-4" /></Button>
-          </div>
-        </div>
-      )}
-
-      {state === "pulling" && (
-        <div className="mt-8 flex flex-col items-center justify-center gap-3 py-8 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-brand" />
-          <p className="text-sm font-medium">Retrieving your account data…</p>
-          <p className="max-w-xs text-xs text-muted-foreground">Cadence is calling {multi ? `all ${banks.length} banks'` : `${bankName(primary)}'s`} Berlin Group AIS endpoints, aggregating and categorising ~6 months of transactions.</p>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      <div className={cn("mt-1 rounded-lg border bg-muted/40 px-3 py-2 text-sm", mono && "font-mono")}>{value}</div>
-    </div>
-  );
-}
-
 // ---- Step 4: Done ----
-function DoneStep({ persona, amount, term, purpose, onConsole, pending }: { persona: PersonaProfile; amount: number; term: number; purpose: LoanPurpose; onConsole: () => void; pending: boolean }) {
+function DoneStep({ persona, amount, term, purpose, banks, onConsole, pending }: { persona: PersonaProfile; amount: number; term: number; purpose: LoanPurpose; banks: string[]; onConsole: () => void; pending: boolean }) {
   return (
     <Card className="text-center">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success-muted text-success-foreground">
@@ -394,7 +485,7 @@ function DoneStep({ persona, amount, term, purpose, onConsole, pending }: { pers
       </div>
       <h2 className="mt-4 font-heading text-2xl font-semibold">Application submitted</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-        Thanks, {persona.name.split(" ")[0]}. Your request for {formatEUR(amount, false)} over {term} months ({purposeLabel(purpose)}) is now a pending application in the loan officer console, with consent recorded and the full data pull logged to the audit trail.
+        Thanks, {persona.name.split(" ")[0]}. Your request for {formatEUR(amount, false)} over {term} months ({purposeLabel(purpose)}) is now a pending application, aggregated across {banks.length} connected bank{banks.length > 1 ? "s" : ""} ({banks.map(bankName).join(", ")}), with per-bank consent recorded and the full data pull logged to the audit trail.
       </p>
       <div className="mx-auto mt-5 max-w-sm rounded-xl border bg-muted/30 p-4 text-left text-sm">
         <p className="font-medium">What happens next</p>

@@ -14,6 +14,8 @@ export interface Transaction {
   /** Raw bank description, as it would appear on a statement. */
   description: string;
   counterparty?: string;
+  /** Counterparty account IBAN (Berlin Group creditor/debtorAccount.iban). */
+  counterpartyIban?: string;
   direction: Direction;
   /** Which ASPSP this line came from (set by the AIS aggregator). */
   bankId?: string;

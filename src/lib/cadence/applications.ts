@@ -110,7 +110,7 @@ async function sessionAppToItem(a: AppRecord): Promise<AppListItem> {
     termMonths: a.termMonths,
     purpose: a.purpose,
   };
-  const d = await getDecision(a.personaId, request, "seed");
+  const d = await getDecision(a.personaId, request, "seed", undefined, a.connectedBanks ?? undefined);
   return {
     id: a.id,
     personaId: a.personaId,
@@ -149,6 +149,8 @@ export interface ApplicationResolved {
   status: ApplicationStatus;
   submittedAt: string;
   appId: string;
+  /** Connected ASPSPs (null = all the persona's banks). */
+  connectedBanks: string[] | null;
 }
 
 /** Resolve a console application id (seed-* or a session row) to its inputs. */
@@ -169,6 +171,7 @@ export async function resolveApplication(
       status: "pending",
       submittedAt: seedSubmittedAt(Math.max(0, index)),
       appId: id,
+      connectedBanks: null,
     };
   }
   const a = await getStore().getApplicationById(sessionId, id);
@@ -181,6 +184,7 @@ export async function resolveApplication(
     status: a.status,
     submittedAt: a.submittedAt,
     appId: a.id,
+    connectedBanks: a.connectedBanks,
   };
 }
 

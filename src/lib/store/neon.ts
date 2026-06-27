@@ -53,6 +53,7 @@ export class NeonStore implements Store {
         purpose: input.purpose,
         status: input.status ?? "pending",
         source: input.source ?? "applicant",
+        connectedBanks: input.connectedBanks ?? null,
       })
       .returning();
     return this.toApp(row);
@@ -195,6 +196,7 @@ export class NeonStore implements Store {
       purpose: r.purpose as LoanPurpose,
       status: r.status as ApplicationStatus,
       source: r.source as "applicant" | "seed",
+      connectedBanks: (r.connectedBanks as string[] | null) ?? null,
       submittedAt: iso(r.submittedAt)!,
     };
   }
