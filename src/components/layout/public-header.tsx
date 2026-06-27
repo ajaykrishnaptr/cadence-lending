@@ -7,9 +7,20 @@ export function PublicHeader() {
   return (
     <header className="sticky top-[33px] z-40 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="transition-opacity hover:opacity-80">
-          <CadenceLogo />
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/" className="transition-opacity hover:opacity-80">
+            <CadenceLogo />
+          </Link>
+          <span className="hidden h-8 w-px bg-border md:inline-block" />
+          <div className="hidden flex-col leading-tight md:flex">
+            <span className="text-xs font-medium text-foreground">
+              Open Finance Data · Lending Decision Engine
+            </span>
+            <span className="mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-brand/10 px-1.5 py-[1px] text-[10px] font-medium text-brand">
+              AI-powered · Gemini + Groq
+            </span>
+          </div>
+        </div>
         <nav className="flex items-center gap-1">
           <Button variant="ghost" size="sm" asChild>
             <Link href="/eval">Model eval</Link>

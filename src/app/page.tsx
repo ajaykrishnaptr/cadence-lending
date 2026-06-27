@@ -153,7 +153,17 @@ export default function Home() {
             All brands are fictional placeholders. Synthetic data only. No real
             institution is represented.
           </p>
-          <p>Built with Claude Code.</p>
+          <p>
+            Prototype by{" "}
+            <a
+              href="https://www.linkedin.com/in/ajaykrishna1/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground underline underline-offset-4 hover:text-brand"
+            >
+              Ajay Krishna
+            </a>
+          </p>
         </div>
       </footer>
     </div>
