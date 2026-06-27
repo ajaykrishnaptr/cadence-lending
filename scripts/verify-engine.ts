@@ -17,6 +17,7 @@ const EXPECT: Record<string, string> = {
   "jonas-frei": "approve",
   "sofia-lindqvist": "refer",
   "erik-hofer": "approve",
+  "lena-brandt": "refer",
 };
 
 let pass = 0;
@@ -50,4 +51,21 @@ for (const p of PROFILES) {
   );
 }
 console.log(`\n${pass}/${PROFILES.length} outcomes match intended design.`);
-if (pass !== PROFILES.length) process.exit(1);
+
+// Multibanking teaching case: Lena approves on one bank, refers on two.
+const lenaP = PROFILES.find((p) => p.id === "lena-brandt")!;
+const lenaData = getPersonaData("lena-brandt")!;
+const catOf = (txns: typeof lenaData.transactions): CategorisedTransaction[] =>
+  txns.map((t) => {
+    const internal = parseBgTransaction(serializeTransaction(t), t.accountId);
+    return { ...internal, categorisation: categoriseByRules(internal), source: "rules" as const };
+  });
+const demoOnly = runDecision(catOf(lenaData.transactions.filter((t) => !t.accountId.includes("civic-bank"))), lenaP.request, CONSUMER_LOAN, lenaP.householdSize);
+const both = runDecision(catOf(lenaData.transactions), lenaP.request, CONSUMER_LOAN, lenaP.householdSize);
+console.log(`\nMultibanking case — Lena Brandt (request €${lenaP.request.amount}/${lenaP.request.termMonths}mo):`);
+console.log(`  Demo Bank only -> ${demoOnly.outcomeLabel.padEnd(22)} avail €${demoOnly.haushalt.available}  oblig €${demoOnly.obligations.totalMonthly}  dti ${(demoOnly.dti * 100).toFixed(0)}%`);
+console.log(`  Both banks     -> ${both.outcomeLabel.padEnd(22)} avail €${both.haushalt.available}  oblig €${both.obligations.totalMonthly}  dti ${(both.dti * 100).toFixed(0)}%`);
+const flips = demoOnly.outcome === "approve" && both.outcome === "refer";
+console.log(flips ? "  ✓ connecting the 2nd bank flips approve -> refer" : "  ✗ expected approve -> refer");
+
+if (pass !== PROFILES.length || !flips) process.exit(1);

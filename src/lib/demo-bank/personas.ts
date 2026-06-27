@@ -295,6 +295,50 @@ export const PROFILES: ProfileSpec[] = [
     ],
     adverse: { overdraftPerMonth: 1, gamblingPerMonth: 2, gamblingMerchants: ["LuckySpin", "BetParadies"] },
   },
+  {
+    id: "lena-brandt",
+    name: "Lena Brandt",
+    tagline: "Clean at one bank, stretched across two",
+    expected: "refer",
+    expectedLabel: "Refer — hidden debt at a 2nd bank",
+    age: 33,
+    occupation: "Marketing manager",
+    city: "Köln",
+    householdSize: 1,
+    tenureMonths: 6,
+    request: { amount: 10000, termMonths: 36, purpose: "major-purchase" },
+    blurb:
+      "Her Demo Bank account looks comfortably affordable — connect only that and she is a clean approve. But a recurring transfer points to a second bank carrying a personal loan and a BNPL plan. Aggregate both and her available income falls inside the affordability buffer: a referral. The case for capturing every bank an applicant uses.",
+    openingBalance: 1900,
+    savingsBalance: 2600,
+    salary: { employer: "Rheinmedia Agentur", amount: 2600, day: 28, jitter: 0.02 },
+    recurring: [
+      { desc: "Miete Wohnung", counterparty: "Wohnbau Köln", amount: 800, day: 1, category: "rent" },
+      { desc: "Stadtwerke Rheinlicht Strom", amount: 72, day: 6, category: "utilities" },
+      { desc: "NetzKlar Internet", amount: 35, day: 9, category: "utilities" },
+      { desc: "MobilEins Mobilfunk", amount: 25, day: 12, category: "utilities" },
+      { desc: "Streamly Abo", amount: 13, day: 16, category: "subscriptions" },
+    ],
+    spend: [
+      { merchants: GROCERS, perMonth: 9, avg: 46, jitter: 0.4, category: "groceries" },
+      { merchants: EATING_OUT, perMonth: 3, avg: 27, jitter: 0.5, category: "discretionary" },
+      { merchants: TRANSIT, perMonth: 2, avg: 49, jitter: 0.2, category: "transport" },
+    ],
+    secondBank: {
+      bankId: "civic-bank",
+      accounts: [
+        {
+          type: "checking",
+          name: "Civic Girokonto",
+          balance: 320,
+          recurring: [
+            { desc: "Konsumkredit Rate", counterparty: "KreditWerk", amount: 340, day: 5, category: "loan-repayment" },
+            { desc: "PayLater3 Rate", counterparty: "PayLater3", amount: 150, day: 11, category: "bnpl" },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export function getProfile(id: string): ProfileSpec | undefined {

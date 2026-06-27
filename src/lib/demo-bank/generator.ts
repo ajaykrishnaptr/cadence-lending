@@ -234,9 +234,12 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
       const day = clampDay(profile.salary.day + 2);
       if (day <= cutoff) {
         const otherIban = ibanFor(getBank(sb.bankId)!.bankCode, `${sb.bankId}-0`);
+        // fund the second account's obligations so its balance stays plausible
+        const oblTotal = (sb.accounts[0].recurring ?? []).reduce((s, r) => s + r.amount, 0);
+        const amt = oblTotal > 0 ? jit(oblTotal + range(30, 70), 0.04) : range(120, 240);
         add({
           bookingDate: iso(mr.year, mr.month, day),
-          amount: round2(-range(120, 240)),
+          amount: round2(-amt),
           description: `Übertrag an ${bankName(sb.bankId)} ${sb.accounts[0].name}`,
           counterparty: bankName(sb.bankId),
           counterpartyIban: otherIban,
