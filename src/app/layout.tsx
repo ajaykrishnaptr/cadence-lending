@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter, Fraunces, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DemoRibbon } from "@/components/demo-ribbon";
@@ -11,9 +11,11 @@ const inter = Inter({
   subsets: ["latin"],
 });
 
-const spaceGrotesk = Space_Grotesk({
+// Editorial serif display — financial gravitas, distinct from the SaaS default.
+const fraunces = Fraunces({
   variable: "--font-heading",
   subsets: ["latin"],
+  axes: ["opsz", "SOFT"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -36,7 +38,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full`}
+      className={`${inter.variable} ${fraunces.variable} ${jetbrainsMono.variable} h-full`}
     >
       <body className="min-h-full">
         <ThemeProvider
