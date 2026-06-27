@@ -206,3 +206,102 @@ export async function getConsentView(
 }
 
 export { FULL_SCOPE, CONSENT_PURPOSE };
+
+// ---- consent management view ----
+export interface ConsentRow {
+  id: string;
+  applicationId: string;
+  applicantName: string;
+  personaId: string;
+  scope: ConsentScope;
+  grantedAt: string;
+  expiresAt: string;
+  status: "active" | "withdrawn";
+  source: "seed" | "session";
+}
+
+export async function getConsoleConsents(sessionId: string): Promise<ConsentRow[]> {
+  const personas = listPersonas();
+  const seed: ConsentRow[] = personas.map((p, i) => {
+    const c = seedConsent(p.id, i);
+    return {
+      id: `seed-consent-${p.id}`,
+      applicationId: seedId(p.id),
+      applicantName: p.name,
+      personaId: p.id,
+      scope: c.scope,
+      grantedAt: c.grantedAt,
+      expiresAt: c.expiresAt,
+      status: "active",
+      source: "seed",
+    };
+  });
+
+  const store = getStore();
+  const [apps, consents] = await Promise.all([
+    store.listApplications(sessionId),
+    store.listConsents(sessionId),
+  ]);
+  const nameByApp = new Map(apps.map((a) => [a.id, a.applicantName]));
+  const session: ConsentRow[] = consents.map((c) => ({
+    id: c.id,
+    applicationId: c.applicationId ?? "",
+    applicantName: (c.applicationId && nameByApp.get(c.applicationId)) || "Applicant",
+    personaId: c.personaId,
+    scope: c.scope,
+    grantedAt: c.grantedAt,
+    expiresAt: c.expiresAt,
+    status: c.status,
+    source: "session",
+  }));
+
+  return [...session, ...seed];
+}
+
+// ---- audit log view (synthesised seed trail + this session's real events) ----
+export interface AuditRow {
+  id: string;
+  applicationId: string | null;
+  applicantName: string;
+  type: string;
+  message: string;
+  actor: "applicant" | "officer" | "system";
+  createdAt: string;
+  meta?: Record<string, unknown> | null;
+}
+
+function seedAuditTrail(): AuditRow[] {
+  const rows: AuditRow[] = [];
+  listPersonas().forEach((p, i) => {
+    const base = new Date(seedSubmittedAt(i)).getTime();
+    const at = (offsetMin: number) => new Date(base + offsetMin * 60000).toISOString();
+    const appId = seedId(p.id);
+    rows.push(
+      { id: `${appId}-a0`, applicationId: appId, applicantName: p.name, type: "consent.granted", message: "Consent granted for account information access (180-day expiry, 4/4 scopes).", actor: "applicant", createdAt: at(0) },
+      { id: `${appId}-a1`, applicationId: appId, applicantName: p.name, type: "data.pull", message: "Retrieved accounts and ~6 months of transactions via the AIS provider (Demo Bank · Berlin Group NextGenPSD2).", actor: "system", createdAt: at(1) },
+      { id: `${appId}-a2`, applicationId: appId, applicantName: p.name, type: "categorisation", message: "Categorised statement transactions (pre-computed categoriser, schema v1).", actor: "system", createdAt: at(2) },
+      { id: `${appId}-a3`, applicationId: appId, applicantName: p.name, type: "decision.engine", message: `Affordability engine result recorded for ${p.name}.`, actor: "system", createdAt: at(3) },
+    );
+  });
+  return rows;
+}
+
+export async function getConsoleAudit(sessionId: string): Promise<AuditRow[]> {
+  const store = getStore();
+  const [apps, events] = await Promise.all([
+    store.listApplications(sessionId),
+    store.listAudit(sessionId),
+  ]);
+  const nameByApp = new Map(apps.map((a) => [a.id, a.applicantName]));
+  const session: AuditRow[] = events.map((e) => ({
+    id: e.id,
+    applicationId: e.applicationId,
+    applicantName: (e.applicationId && nameByApp.get(e.applicationId)) || "—",
+    type: e.type,
+    message: e.message,
+    actor: e.actor,
+    createdAt: e.createdAt,
+    meta: e.meta,
+  }));
+  return [...session, ...seedAuditTrail()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
