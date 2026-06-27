@@ -8,6 +8,13 @@
       "when": 1782531598087,
       "tag": "0000_fancy_giant_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782537870408,
+      "tag": "0001_groovy_william_stryker",
+      "breakpoints": true
     }
   ]
 }

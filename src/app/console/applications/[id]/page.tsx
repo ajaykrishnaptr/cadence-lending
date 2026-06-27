@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getSessionId } from "@/lib/session";
 import { getProfile } from "@/lib/demo-bank";
 import { getDecision, getAccountData } from "@/lib/cadence";
-import { resolveApplication, getConsentView, outcomeToStatus } from "@/lib/cadence/applications";
+import { resolveApplication, getConsentViews, outcomeToStatus } from "@/lib/cadence/applications";
 import { getStore } from "@/lib/store";
 import { buildRationale } from "@/lib/rationale";
 import { ApplicationDetail } from "@/components/console/application-detail";
@@ -20,10 +20,10 @@ export default async function ApplicationDetailPage({
   const profile = getProfile(resolved.personaId);
   if (!profile) notFound();
 
-  const [decision, accountData, consent] = await Promise.all([
+  const [decision, accountData, consents] = await Promise.all([
     getDecision(resolved.personaId, resolved.request, "seed"),
     getAccountData(resolved.personaId),
-    getConsentView(sid, resolved),
+    getConsentViews(sid, resolved),
   ]);
 
   const latest = resolved.isSeed ? undefined : await getStore().latestDecision(sid, resolved.appId);
@@ -50,7 +50,7 @@ export default async function ApplicationDetailPage({
       decision={decision}
       accounts={accountData.accounts}
       balanceSeries={accountData.balanceSeries}
-      consent={consent ?? null}
+      consents={consents}
       officerDecision={officerDecision}
       initialRationale={initialRationale}
     />

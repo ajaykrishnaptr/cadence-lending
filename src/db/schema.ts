@@ -34,6 +34,8 @@ export const consents = pgTable("consents", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
   personaId: text("persona_id").notNull(),
+  /** The ASPSP this consent authorises (per-bank consent). */
+  bankId: text("bank_id").notNull().default("demo-bank"),
   applicationId: text("application_id"),
   scope: jsonb("scope").notNull(),
   purpose: text("purpose").notNull(),

@@ -1,0 +1,1 @@
+ALTER TABLE "consents" ADD COLUMN "bank_id" text DEFAULT 'demo-bank' NOT NULL;

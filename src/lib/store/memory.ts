@@ -89,6 +89,7 @@ export class MemoryStore implements Store {
       id: newId(),
       sessionId: input.sessionId,
       personaId: input.personaId,
+      bankId: input.bankId,
       applicationId: input.applicationId,
       scope: input.scope,
       purpose: input.purpose,
@@ -107,8 +108,8 @@ export class MemoryStore implements Store {
       .sort((a, b) => (a.grantedAt < b.grantedAt ? 1 : -1));
   }
 
-  async getConsentForApplication(sessionId: string, applicationId: string): Promise<ConsentRec | undefined> {
-    return state.consents.find((c) => c.sessionId === sessionId && c.applicationId === applicationId);
+  async getConsentsForApplication(sessionId: string, applicationId: string): Promise<ConsentRec[]> {
+    return state.consents.filter((c) => c.sessionId === sessionId && c.applicationId === applicationId);
   }
 
   async withdrawConsent(sessionId: string, consentId: string): Promise<ConsentRec | undefined> {

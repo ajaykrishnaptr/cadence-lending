@@ -90,6 +90,7 @@ export class NeonStore implements Store {
         id,
         sessionId: input.sessionId,
         personaId: input.personaId,
+        bankId: input.bankId,
         applicationId: input.applicationId,
         scope: input.scope,
         purpose: input.purpose,
@@ -110,12 +111,12 @@ export class NeonStore implements Store {
     return rows.map((r) => this.toConsent(r));
   }
 
-  async getConsentForApplication(sessionId: string, applicationId: string): Promise<ConsentRec | undefined> {
+  async getConsentsForApplication(sessionId: string, applicationId: string): Promise<ConsentRec[]> {
     const rows = await this.db
       .select()
       .from(consents)
       .where(and(eq(consents.sessionId, sessionId), eq(consents.applicationId, applicationId)));
-    return rows[0] ? this.toConsent(rows[0]) : undefined;
+    return rows.map((r) => this.toConsent(r));
   }
 
   async withdrawConsent(sessionId: string, consentId: string): Promise<ConsentRec | undefined> {
@@ -202,6 +203,7 @@ export class NeonStore implements Store {
       id: r.id,
       sessionId: r.sessionId,
       personaId: r.personaId,
+      bankId: r.bankId,
       applicationId: r.applicationId,
       scope: r.scope as ConsentScope,
       purpose: r.purpose,

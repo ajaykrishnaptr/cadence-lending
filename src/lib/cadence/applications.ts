@@ -1,4 +1,4 @@
-import { listPersonas, getProfile } from "../demo-bank";
+import { listPersonas, getProfile, banksForPersona } from "../demo-bank";
 import type {
   ApplicationStatus,
   ConsentScope,
@@ -10,6 +10,7 @@ import { getDecision } from ".";
 
 export interface ConsentView {
   id: string | null;
+  bankId: string;
   scope: ConsentScope;
   purpose: string;
   grantedAt: string;
@@ -54,14 +55,15 @@ function seedId(personaId: string): string {
   return `seed-${personaId}`;
 }
 
-/** Deterministic consent dates for seeded personas (granted in the recent past). */
-function seedConsent(personaId: string, index: number): ConsentView {
-  const grantedDay = 4 + index * 6;
+/** Deterministic per-bank consent dates for seeded personas (granted recently). */
+function seedConsent(personaId: string, index: number, bankId: string, bankIndex: number): ConsentView {
+  const grantedDay = 4 + index * 6 + bankIndex * 2;
   const granted = new Date(Date.UTC(2026, 3, grantedDay)); // April 2026
   const expires = new Date(granted);
   expires.setUTCDate(expires.getUTCDate() + 180);
   return {
-    id: null,
+    id: `seed-consent-${personaId}-${bankId}`,
+    bankId,
     scope: FULL_SCOPE,
     purpose: CONSENT_PURPOSE,
     grantedAt: granted.toISOString(),
@@ -182,27 +184,29 @@ export async function resolveApplication(
   };
 }
 
-/** Consent for an application: synthesized for seed, from the store for session. */
-export async function getConsentView(
+/** Per-bank consents for an application: synthesized for seed, from the store otherwise. */
+export async function getConsentViews(
   sessionId: string,
   resolved: ApplicationResolved,
-): Promise<ConsentView | undefined> {
+): Promise<ConsentView[]> {
   if (resolved.isSeed) {
     const index = Math.max(0, listPersonas().findIndex((p) => p.id === resolved.personaId));
-    return seedConsent(resolved.personaId, index);
+    return banksForPersona(resolved.personaId).map((bankId, bi) =>
+      seedConsent(resolved.personaId, index, bankId, bi),
+    );
   }
-  const c = await getStore().getConsentForApplication(sessionId, resolved.appId);
-  if (!c) return undefined;
-  return {
+  const cs = await getStore().getConsentsForApplication(sessionId, resolved.appId);
+  return cs.map((c) => ({
     id: c.id,
+    bankId: c.bankId,
     scope: c.scope,
     purpose: c.purpose,
     grantedAt: c.grantedAt,
     expiresAt: c.expiresAt,
     status: c.status,
     withdrawnAt: c.withdrawnAt,
-    source: "session",
-  };
+    source: "session" as const,
+  }));
 }
 
 export { FULL_SCOPE, CONSENT_PURPOSE };
@@ -213,6 +217,7 @@ export interface ConsentRow {
   applicationId: string;
   applicantName: string;
   personaId: string;
+  bankId: string;
   scope: ConsentScope;
   grantedAt: string;
   expiresAt: string;
@@ -222,20 +227,23 @@ export interface ConsentRow {
 
 export async function getConsoleConsents(sessionId: string): Promise<ConsentRow[]> {
   const personas = listPersonas();
-  const seed: ConsentRow[] = personas.map((p, i) => {
-    const c = seedConsent(p.id, i);
-    return {
-      id: `seed-consent-${p.id}`,
-      applicationId: seedId(p.id),
-      applicantName: p.name,
-      personaId: p.id,
-      scope: c.scope,
-      grantedAt: c.grantedAt,
-      expiresAt: c.expiresAt,
-      status: "active",
-      source: "seed",
-    };
-  });
+  const seed: ConsentRow[] = personas.flatMap((p, i) =>
+    banksForPersona(p.id).map((bankId, bi) => {
+      const c = seedConsent(p.id, i, bankId, bi);
+      return {
+        id: c.id!,
+        applicationId: seedId(p.id),
+        applicantName: p.name,
+        personaId: p.id,
+        bankId,
+        scope: c.scope,
+        grantedAt: c.grantedAt,
+        expiresAt: c.expiresAt,
+        status: "active" as const,
+        source: "seed" as const,
+      };
+    }),
+  );
 
   const store = getStore();
   const [apps, consents] = await Promise.all([
@@ -248,6 +256,7 @@ export async function getConsoleConsents(sessionId: string): Promise<ConsentRow[
     applicationId: c.applicationId ?? "",
     applicantName: (c.applicationId && nameByApp.get(c.applicationId)) || "Applicant",
     personaId: c.personaId,
+    bankId: c.bankId,
     scope: c.scope,
     grantedAt: c.grantedAt,
     expiresAt: c.expiresAt,

@@ -53,20 +53,39 @@ export interface DetailProps {
   decision: DecisionPackage & { categoriserSource: CategoriserSource; categoriserFellBack?: boolean };
   accounts: Account[];
   balanceSeries: { date: string; balance: number }[];
-  consent: ConsentView | null;
+  consents: ConsentView[];
   officerDecision: DecisionRec | null;
   initialRationale: string;
 }
 
 export function ApplicationDetail(props: DetailProps) {
   const { meta, decision } = props;
-  const [withdrawn, setWithdrawn] = useState(props.consent?.status === "withdrawn");
+  const router = useRouter();
+  const [pending, startRevoke] = useTransition();
+  const [withdrawn, setWithdrawn] = useState<Set<string>>(
+    () => new Set(props.consents.filter((c) => c.status === "withdrawn").map((c) => c.bankId)),
+  );
+
+  function revokeBank(c: ConsentView) {
+    startRevoke(async () => {
+      if (c.source === "session" && c.id) {
+        const res = await withdrawConsentAction({ consentId: c.id, applicationId: meta.appId });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        router.refresh();
+      }
+      setWithdrawn((prev) => new Set(prev).add(c.bankId));
+      toast.success(`Consent withdrawn — ${bankName(c.bankId)}`, { description: "That bank's account data is now hidden in the console." });
+    });
+  }
 
   return (
     <ExplainProvider transactions={decision.transactions}>
       <div className="space-y-6">
-        <Header {...props} withdrawn={withdrawn} />
-        <SummaryBand {...props} />
+        <Header meta={meta} consents={props.consents} withdrawn={withdrawn} />
+        <SummaryBand decision={decision} meta={meta} />
         <Tabs defaultValue="overview">
           <TabsList className="flex-wrap">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -77,7 +96,15 @@ export function ApplicationDetail(props: DetailProps) {
             <TabsTrigger value="decision">Decision</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="mt-5">
-            <OverviewTab {...props} withdrawn={withdrawn} setWithdrawn={setWithdrawn} />
+            <OverviewTab
+              accounts={props.accounts}
+              balanceSeries={props.balanceSeries}
+              consents={props.consents}
+              decision={decision}
+              withdrawn={withdrawn}
+              revokeBank={revokeBank}
+              pending={pending}
+            />
           </TabsContent>
           <TabsContent value="transactions" className="mt-5">
             <TransactionsTab decision={decision} personaId={meta.personaId} withdrawn={withdrawn} />
@@ -101,8 +128,16 @@ export function ApplicationDetail(props: DetailProps) {
 }
 
 // ---------------- Header ----------------
-function Header({ meta, consent, withdrawn }: DetailProps & { withdrawn: boolean }) {
-  const days = consent ? daysUntil(consent.expiresAt) : null;
+function Header({ meta, consents, withdrawn }: { meta: DetailMeta; consents: ConsentView[]; withdrawn: Set<string> }) {
+  const total = consents.length;
+  const active = consents.filter((c) => !withdrawn.has(c.bankId));
+  const allWithdrawn = total > 0 && active.length === 0;
+  const minDays = active.length ? Math.min(...active.map((c) => daysUntil(c.expiresAt))) : 0;
+  const label = allWithdrawn
+    ? "Consent withdrawn"
+    : total > 1
+      ? `Consent · ${active.length}/${total} banks active`
+      : `Consent active · ${minDays}d to expiry`;
   return (
     <div className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div>
@@ -123,17 +158,17 @@ function Header({ meta, consent, withdrawn }: DetailProps & { withdrawn: boolean
       </div>
       <div className="flex flex-col items-start gap-2 sm:items-end">
         <StatusBadge status={meta.status} />
-        {consent && (
+        {total > 0 && (
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
-              withdrawn
+              allWithdrawn
                 ? "bg-danger-muted text-danger-foreground ring-danger/30"
                 : "bg-success-muted text-success-foreground ring-success/30",
             )}
           >
-            {withdrawn ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-            {withdrawn ? "Consent withdrawn" : `Consent active · ${days}d to expiry`}
+            {allWithdrawn ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            {label}
           </span>
         )}
       </div>
@@ -142,7 +177,7 @@ function Header({ meta, consent, withdrawn }: DetailProps & { withdrawn: boolean
 }
 
 // ---------------- Summary band ----------------
-function SummaryBand({ decision, meta }: DetailProps) {
+function SummaryBand({ decision, meta }: { decision: DetailProps["decision"]; meta: DetailMeta }) {
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <div className="rounded-xl border bg-card p-4">
@@ -171,71 +206,63 @@ function SummaryBand({ decision, meta }: DetailProps) {
 }
 
 // ---------------- Overview ----------------
-function OverviewTab({ accounts, balanceSeries, consent, decision, meta, withdrawn, setWithdrawn }: DetailProps & { withdrawn: boolean; setWithdrawn: (v: boolean) => void }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-
-  function revoke() {
-    start(async () => {
-      if (consent?.id) {
-        const res = await withdrawConsentAction({ consentId: consent.id, applicationId: meta.appId });
-        if (!res.ok) {
-          toast.error(res.error);
-          return;
-        }
-        router.refresh();
-      }
-      setWithdrawn(true);
-      toast.success("Consent withdrawn", { description: "Account data is now hidden in the console (visual state)." });
-    });
-  }
-
+function OverviewTab({ accounts, balanceSeries, consents, decision, withdrawn, revokeBank, pending }: {
+  accounts: Account[];
+  balanceSeries: { date: string; balance: number }[];
+  consents: ConsentView[];
+  decision: DetailProps["decision"];
+  withdrawn: Set<string>;
+  revokeBank: (c: ConsentView) => void;
+  pending: boolean;
+}) {
   return (
     <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
       <div className="space-y-5">
         {/* Accounts grouped by ASPSP (multibanking) */}
-        <AccountsByBank accounts={accounts} withdrawn={withdrawn} />
+        <AccountsByBank accounts={accounts} withdrawnBanks={withdrawn} />
         {/* Balance chart */}
         <div className="rounded-xl border bg-card p-4">
           <div className="mb-2 text-sm font-medium">Checking balance · last 6 months</div>
-          {withdrawn ? <HiddenPanel /> : <BalanceChart data={balanceSeries} />}
+          {withdrawn.has("demo-bank") ? <HiddenPanel /> : <BalanceChart data={balanceSeries} />}
         </div>
       </div>
 
       {/* Consent panel */}
       <div className="space-y-5">
         <div className="rounded-xl border bg-card p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="font-heading text-sm font-semibold">Consent (AIS)</h3>
-            {consent && !withdrawn && (
-              <Button variant="destructive" size="sm" onClick={revoke} disabled={pending}>
-                <ShieldOff className="h-3.5 w-3.5" /> Revoke
-              </Button>
-            )}
-          </div>
-          {consent ? (
-            <div className="mt-3 space-y-3 text-sm">
-              <Row label="Status" value={withdrawn ? <span className="font-medium text-danger-foreground">Withdrawn</span> : <span className="font-medium text-success-foreground">Active</span>} />
-              <Row label="Granted" value={formatDate(consent.grantedAt.slice(0, 10))} />
-              <Row label="Expires (180 days)" value={`${formatDate(consent.expiresAt.slice(0, 10))} · ${daysUntil(consent.expiresAt)}d`} />
-              <div>
-                <span className="text-xs text-muted-foreground">Scopes granted</span>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {Object.entries(consent.scope).map(([k, v]) => (
-                    <span key={k} className={cn("rounded-md px-1.5 py-0.5 text-[11px] ring-1 ring-inset", v ? "bg-brand-muted text-brand ring-brand/20" : "bg-muted text-muted-foreground ring-border line-through")}>
-                      {k}
-                    </span>
-                  ))}
+          <h3 className="font-heading text-sm font-semibold">Consent (AIS)</h3>
+          {consents.length > 1 && (
+            <p className="mt-0.5 text-xs text-muted-foreground">One consent per bank — each can be revoked independently.</p>
+          )}
+          <div className="mt-3 space-y-2.5">
+            {consents.map((c) => {
+              const wd = withdrawn.has(c.bankId);
+              return (
+                <div key={c.bankId} className={cn("rounded-lg border p-3", wd && "border-danger/30 bg-danger-muted/30")}>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-sm font-medium"><Landmark className="h-3.5 w-3.5 text-brand" /> {bankName(c.bankId)}</span>
+                    {wd ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-danger-muted px-2 py-0.5 text-[11px] font-medium text-danger-foreground ring-1 ring-inset ring-danger/30"><ShieldOff className="h-3 w-3" /> Withdrawn</span>
+                    ) : (
+                      <Button variant="destructive" size="sm" onClick={() => revokeBank(c)} disabled={pending}><ShieldOff className="h-3.5 w-3.5" /> Revoke</Button>
+                    )}
+                  </div>
+                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <div className="flex justify-between"><span>Granted</span><span className="tabular-nums text-foreground">{formatDate(c.grantedAt.slice(0, 10))}</span></div>
+                    <div className="flex justify-between"><span>Expires (180d)</span><span className="tabular-nums text-foreground">{formatDate(c.expiresAt.slice(0, 10))} · {daysUntil(c.expiresAt)}d</span></div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {Object.entries(c.scope).map(([k, v]) => (
+                      <span key={k} className={cn("rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset", v ? "bg-brand-muted text-brand ring-brand/20" : "bg-muted text-muted-foreground ring-border line-through")}>{k}</span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              {withdrawn && (
-                <p className="rounded-lg bg-danger-muted/60 p-2 text-xs text-danger-foreground">
-                  Consent withdrawn — account data hidden from the console. This is a visual state; the demo does not truly gate the underlying data.
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">No consent record for this application.</p>
+              );
+            })}
+            {consents.length === 0 && <p className="text-sm text-muted-foreground">No consent record for this application.</p>}
+          </div>
+          {withdrawn.size > 0 && (
+            <p className="mt-3 rounded-lg bg-danger-muted/60 p-2 text-xs text-danger-foreground">Withdrawn banks&apos; account data is hidden from the console. This is a visual state; the demo does not truly gate the underlying data.</p>
           )}
         </div>
 
@@ -254,7 +281,7 @@ function OverviewTab({ accounts, balanceSeries, consent, decision, meta, withdra
   );
 }
 
-function AccountsByBank({ accounts, withdrawn }: { accounts: Account[]; withdrawn: boolean }) {
+function AccountsByBank({ accounts, withdrawnBanks }: { accounts: Account[]; withdrawnBanks: Set<string> }) {
   const banks = [...new Set(accounts.map((a) => a.bankId))];
   return (
     <div className="space-y-4">
@@ -264,31 +291,35 @@ function AccountsByBank({ accounts, withdrawn }: { accounts: Account[]; withdraw
           Aggregated across {banks.length} banks via open banking — {banks.map(bankName).join(" + ")}
         </div>
       )}
-      {banks.map((bankId) => (
-        <div key={bankId}>
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <Landmark className="h-3.5 w-3.5" /> {bankName(bankId)}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {accounts.filter((a) => a.bankId === bankId).map((a) => (
-              <div key={a.id} className="rounded-xl border bg-card p-4">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-muted text-brand">
-                    {a.type === "checking" ? <Building2 className="h-4 w-4" /> : <PiggyBank className="h-4 w-4" />}
-                  </span>
-                  <div>
-                    <div className="text-sm font-medium">{a.name}</div>
-                    <div className="font-mono text-[11px] text-muted-foreground">{withdrawn ? "•••• hidden" : maskIban(a.iban)}</div>
+      {banks.map((bankId) => {
+        const wd = withdrawnBanks.has(bankId);
+        return (
+          <div key={bankId}>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <Landmark className="h-3.5 w-3.5" /> {bankName(bankId)}
+              {wd && <span className="rounded bg-danger-muted px-1.5 py-0.5 text-[9px] font-semibold text-danger-foreground">consent withdrawn</span>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {accounts.filter((a) => a.bankId === bankId).map((a) => (
+                <div key={a.id} className="rounded-xl border bg-card p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-muted text-brand">
+                      {a.type === "checking" ? <Building2 className="h-4 w-4" /> : <PiggyBank className="h-4 w-4" />}
+                    </span>
+                    <div>
+                      <div className="text-sm font-medium">{a.name}</div>
+                      <div className="font-mono text-[11px] text-muted-foreground">{wd ? "•••• hidden" : maskIban(a.iban)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 font-heading text-xl font-semibold tabular-nums">
+                    {wd ? "—" : formatEUR(a.balance)}
                   </div>
                 </div>
-                <div className="mt-3 font-heading text-xl font-semibold tabular-nums">
-                  {withdrawn ? "—" : formatEUR(a.balance)}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -312,7 +343,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // ---------------- Transactions ----------------
-function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailProps["decision"]; personaId: string; withdrawn: boolean }) {
+function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailProps["decision"]; personaId: string; withdrawn: Set<string> }) {
   const [txns, setTxns] = useState<CategorisedTransaction[]>(decision.transactions);
   const [source, setSource] = useState<CategoriserSource>(decision.categoriserSource);
   const [pending, start] = useTransition();
@@ -322,7 +353,8 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
     () => [...txns].sort((a, b) => (a.bookingDate < b.bookingDate ? 1 : -1)),
     [txns],
   );
-  const shown = filter === "all" ? sorted : sorted.filter((t) => t.categorisation.category === filter);
+  const visible = useMemo(() => sorted.filter((t) => !withdrawn.has(t.bankId ?? "")), [sorted, withdrawn]);
+  const shown = filter === "all" ? visible : visible.filter((t) => t.categorisation.category === filter);
   const cats = useMemo(() => [...new Set(txns.map((t) => t.categorisation.category))], [txns]);
   const multiBank = useMemo(() => new Set(txns.map((t) => t.bankId).filter(Boolean)).size > 1, [txns]);
 
@@ -340,7 +372,7 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
     });
   }
 
-  if (withdrawn) return <div className="rounded-xl border bg-card p-4"><HiddenPanel /></div>;
+  if (withdrawn.size > 0 && visible.length === 0) return <div className="rounded-xl border bg-card p-4"><HiddenPanel /></div>;
 
   return (
     <div className="space-y-3">

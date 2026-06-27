@@ -18,6 +18,7 @@ export interface ConsentRec {
   id: string;
   sessionId: string;
   personaId: string;
+  bankId: string;
   applicationId: string | null;
   scope: ConsentScope;
   purpose: string;
@@ -66,6 +67,7 @@ export interface CreateApplicationInput {
 export interface CreateConsentInput {
   sessionId: string;
   personaId: string;
+  bankId: string;
   applicationId: string | null;
   scope: ConsentScope;
   purpose: string;
@@ -104,7 +106,7 @@ export interface Store {
   updateApplicationStatus(sessionId: string, id: string, status: ApplicationStatus): Promise<void>;
   createConsent(input: CreateConsentInput): Promise<ConsentRec>;
   listConsents(sessionId: string): Promise<ConsentRec[]>;
-  getConsentForApplication(sessionId: string, applicationId: string): Promise<ConsentRec | undefined>;
+  getConsentsForApplication(sessionId: string, applicationId: string): Promise<ConsentRec[]>;
   withdrawConsent(sessionId: string, consentId: string): Promise<ConsentRec | undefined>;
   recordDecision(input: RecordDecisionInput): Promise<DecisionRec>;
   latestDecision(sessionId: string, applicationId: string): Promise<DecisionRec | undefined>;

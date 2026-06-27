@@ -7,6 +7,7 @@ import { ShieldCheck, ShieldOff, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import type { ConsentRow } from "@/lib/cadence/applications";
 import { formatDate, daysUntil } from "@/lib/format";
+import { bankName } from "@/lib/demo-bank/banks";
 import { withdrawConsentAction } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ export function ConsentsView({ consents }: { consents: ConsentRow[] }) {
         <thead>
           <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <th className="px-4 py-2.5 font-medium">Applicant</th>
+            <th className="px-4 py-2.5 font-medium">Bank</th>
             <th className="hidden px-4 py-2.5 font-medium md:table-cell">Scopes</th>
             <th className="px-4 py-2.5 font-medium">Granted</th>
             <th className="px-4 py-2.5 font-medium">Expiry (180 days)</th>
@@ -58,6 +60,11 @@ export function ConsentsView({ consents }: { consents: ConsentRow[] }) {
                     {c.applicantName}
                     <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
                   </Link>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    {bankName(c.bankId)}
+                  </span>
                 </td>
                 <td className="hidden px-4 py-3 md:table-cell">
                   <div className="flex flex-wrap gap-1">

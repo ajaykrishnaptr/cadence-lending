@@ -70,15 +70,21 @@ export async function submitApplication(input: SubmitInput) {
     source: "applicant",
   });
 
-  const consent = await store.createConsent({
-    sessionId: sid,
-    personaId: input.personaId,
-    applicationId: app.id,
-    scope,
-    purpose: CONSENT_PURPOSE,
-    grantedAt: grantedAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-  });
+  // one consent per ASPSP — each bank grants access independently (PSD2)
+  const banks = banksForPersona(input.personaId);
+  const grantedScopes = Object.values(scope).filter(Boolean).length;
+  for (const bankId of banks) {
+    await store.createConsent({
+      sessionId: sid,
+      personaId: input.personaId,
+      bankId,
+      applicationId: app.id,
+      scope,
+      purpose: CONSENT_PURPOSE,
+      grantedAt: grantedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+  }
 
   // 2. engine decision (records the recommendation; status stays pending for the officer)
   const decision = await getDecision(input.personaId, request, "seed");
@@ -93,9 +99,13 @@ export async function submitApplication(input: SubmitInput) {
   });
 
   // 3. audit trail for the full flow
-  const banks = banksForPersona(input.personaId);
   const events: { type: string; message: string; actor: "applicant" | "system"; meta?: Record<string, unknown> }[] = [
-    { type: "consent.granted", message: `Consent granted for account information access (180-day expiry, ${Object.values(scope).filter(Boolean).length}/4 scopes).`, actor: "applicant", meta: { consentId: consent.id, scope } },
+    ...banks.map((bankId) => ({
+      type: "consent.granted",
+      message: `Consent granted to ${bankName(bankId)} for account information access (180-day expiry, ${grantedScopes}/4 scopes).`,
+      actor: "applicant" as const,
+      meta: { bankId, scope },
+    })),
     { type: "data.pull", message: `Aggregated accounts and ~6 months of transactions across ${banks.length} bank${banks.length > 1 ? "s" : ""} (${banks.map(bankName).join(", ")}) via the AIS provider (Berlin Group NextGenPSD2).`, actor: "system", meta: { banks, standard: "Berlin Group NextGenPSD2 XS2A" } },
     { type: "categorisation", message: `Categorised ${decision.transactions.length} transactions (${decision.categoriserSource} categoriser).`, actor: "system", meta: { source: decision.categoriserSource, count: decision.transactions.length } },
     { type: "decision.engine", message: `Affordability engine result: ${decision.outcomeLabel}.`, actor: "system", meta: { outcome: decision.outcome, recommendedLimit: decision.recommendedLimit } },
