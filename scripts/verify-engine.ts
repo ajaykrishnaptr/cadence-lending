@@ -3,7 +3,7 @@
  * run the decision engine, and confirm outcomes match the intended demo design.
  *   npx tsx scripts/verify-engine.ts
  */
-import { PROFILES, getPersonaData, bureauInput } from "../src/lib/demo-bank";
+import { PROFILES, getPersonaData, bureauInput, banksForPersona, queryCreditRegistry, bankName } from "../src/lib/demo-bank";
 import { categoriseByRules } from "../src/lib/categoriser/rules";
 import { runDecision } from "../src/lib/engine";
 import { CONSUMER_LOAN } from "../src/lib/engine/config";
@@ -81,4 +81,57 @@ console.log(`  With bureau        -> ${brunoWithBureau.outcomeLabel.padEnd(22)} 
 const bureauFlips = brunoNoBureau.outcome === "approve" && brunoWithBureau.outcome === "decline";
 console.log(bureauFlips ? "  ✓ the bureau hard negative flips approve -> decline" : "  ✗ expected approve -> decline");
 
-if (pass !== PROFILES.length || !flips || !bureauFlips) process.exit(1);
+// Data-coverage rule (R7): a bank the applicant holds but did not connect can
+// hide obligations, so an incomplete picture is referred rather than auto-
+// approved. Coverage is computed exactly as the live app does (cadence/index).
+function coverageFor(personaId: string, connected: string[]) {
+  const known = banksForPersona(personaId);
+  const conn = connected.filter((b) => known.includes(b));
+  const missing = known.filter((b) => !conn.includes(b));
+  const disc = queryCreditRegistry(personaId);
+  return {
+    connectedCount: conn.length,
+    knownCount: known.length,
+    missingBankNames: missing.map(bankName),
+    missingCreditCount: disc.filter((d) => d.isCredit && missing.includes(d.bankId)).length,
+  };
+}
+const r7Of = (d: ReturnType<typeof runDecision>) => d.rules.find((r) => r.id === "coverage")?.status;
+const txnsExcluding = (personaId: string, bankId: string | undefined) =>
+  catOf(getPersonaData(personaId)!.transactions.filter((t) => !bankId || !t.accountId.includes(bankId)));
+
+let covPass = 0;
+let covTotal = 0;
+function covCheck(label: string, cond: boolean, detail: string) {
+  covTotal++;
+  if (cond) covPass++;
+  console.log(`  ${cond ? "✓" : "✗"} ${label} ${detail}`);
+}
+
+console.log("\nData-coverage rule (R7):");
+
+// Lena on one bank: affordability alone would approve, but coverage refers.
+const lenaSecond = banksForPersona("lena-brandt")[1];
+const lenaDemoCov = runDecision(txnsExcluding("lena-brandt", lenaSecond), lenaP.request, CONSUMER_LOAN, lenaP.householdSize, bureauInput("lena-brandt"), coverageFor("lena-brandt", ["demo-bank"]));
+covCheck("Lena one bank  -> refer + R7 refer", lenaDemoCov.outcome === "refer" && r7Of(lenaDemoCov) === "refer",
+  `(${lenaDemoCov.outcomeLabel}, ${lenaDemoCov.dataCoverage?.connectedCount}/${lenaDemoCov.dataCoverage?.knownCount}, ${lenaDemoCov.dataCoverage?.percent}%)`);
+
+// Lena on both banks: coverage complete, R7 passes, still refers on hidden debt.
+const lenaBothCov = runDecision(catOf(lenaData.transactions), lenaP.request, CONSUMER_LOAN, lenaP.householdSize, bureauInput("lena-brandt"), coverageFor("lena-brandt", banksForPersona("lena-brandt")));
+covCheck("Lena both banks -> refer + R7 pass + complete", lenaBothCov.outcome === "refer" && r7Of(lenaBothCov) === "pass" && lenaBothCov.dataCoverage?.complete === true,
+  `(${lenaBothCov.outcomeLabel})`);
+
+// Clara is a clean approve on full coverage; one bank must refer via R7 — this
+// is the false-approve a partial connection would otherwise produce.
+const claraP = PROFILES.find((p) => p.id === "clara-bauer")!;
+const claraSecond = banksForPersona("clara-bauer")[1];
+const claraDemoCov = runDecision(txnsExcluding("clara-bauer", claraSecond), claraP.request, CONSUMER_LOAN, claraP.householdSize, bureauInput("clara-bauer"), coverageFor("clara-bauer", ["demo-bank"]));
+covCheck("Clara one bank -> refer (false-approve guard)", claraDemoCov.outcome === "refer" && r7Of(claraDemoCov) === "refer",
+  `(${claraDemoCov.outcomeLabel}, ${claraDemoCov.dataCoverage?.connectedCount}/${claraDemoCov.dataCoverage?.knownCount})`);
+const claraFullCov = runDecision(catOf(getPersonaData("clara-bauer")!.transactions), claraP.request, CONSUMER_LOAN, claraP.householdSize, bureauInput("clara-bauer"), coverageFor("clara-bauer", banksForPersona("clara-bauer")));
+covCheck("Clara full      -> approve + R7 pass", claraFullCov.outcome === "approve" && r7Of(claraFullCov) === "pass",
+  `(${claraFullCov.outcomeLabel})`);
+
+console.log(`\n${covPass}/${covTotal} data-coverage checks pass.`);
+
+if (pass !== PROFILES.length || !flips || !bureauFlips || covPass !== covTotal) process.exit(1);
