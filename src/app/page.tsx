@@ -34,7 +34,7 @@ export default function Home() {
           <div className="flex flex-col justify-center">
             <span className="inline-flex w-fit items-center gap-2 rounded-full border bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
               <CadenceMark className="h-5 w-5" animate />
-              Open-banking lending decision engine
+              Open Finance Data · lending decision engine
             </span>
             <h1 className="mt-5 font-heading text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               Read the rhythm.
