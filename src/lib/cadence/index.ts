@@ -1,5 +1,5 @@
 import { ais, type BalancePoint } from "../ais";
-import { getProfile, bureauInput } from "../demo-bank";
+import { getProfile, bureauInput, banksForPersona, bankName, queryCreditRegistry } from "../demo-bank";
 import { CONSUMER_LOAN, runDecision, type DecisionPackage, type ProductConfig } from "../engine";
 import type { Account, CategoriserSource, LoanRequest } from "../types";
 import { categorise, type CategoriseResult } from "./categorise";
@@ -71,7 +71,22 @@ export async function getDecision(
   }
 
   const cat = await getCategorised(personaId, source, banks);
-  const pkg = runDecision(cat.transactions, request, product, profile.householdSize, bureauInput(personaId));
+
+  // Data-coverage: which of the persona's known banks were actually connected.
+  // (banks undefined → the default seeded run, where all banks are connected.)
+  const knownBanks = banksForPersona(personaId);
+  const connectedBanks =
+    banks && banks.length ? banks.filter((b) => knownBanks.includes(b)) : knownBanks;
+  const missingIds = knownBanks.filter((b) => !connectedBanks.includes(b));
+  const disclosures = queryCreditRegistry(personaId);
+  const coverage = {
+    connectedCount: connectedBanks.length,
+    knownCount: knownBanks.length,
+    missingBankNames: missingIds.map((b) => bankName(b)),
+    missingCreditCount: disclosures.filter((d) => d.isCredit && missingIds.includes(d.bankId)).length,
+  };
+
+  const pkg = runDecision(cat.transactions, request, product, profile.householdSize, bureauInput(personaId), coverage);
   const enriched = Object.assign(pkg, {
     categoriserSource: cat.source,
     categoriserFellBack: cat.fellBack,

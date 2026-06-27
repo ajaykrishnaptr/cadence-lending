@@ -85,6 +85,11 @@ export class MemoryStore implements Store {
     if (app) app.status = status;
   }
 
+  async updateConnectedBanks(sessionId: string, id: string, banks: string[] | null): Promise<void> {
+    const app = state.applications.find((a) => a.sessionId === sessionId && a.id === id);
+    if (app) app.connectedBanks = banks;
+  }
+
   async createConsent(input: CreateConsentInput): Promise<ConsentRec> {
     const rec: ConsentRec = {
       id: newId(),

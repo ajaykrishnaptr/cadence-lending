@@ -106,6 +106,7 @@ export interface Store {
   listApplications(sessionId: string): Promise<AppRecord[]>;
   getApplicationById(sessionId: string, id: string): Promise<AppRecord | undefined>;
   updateApplicationStatus(sessionId: string, id: string, status: ApplicationStatus): Promise<void>;
+  updateConnectedBanks(sessionId: string, id: string, banks: string[] | null): Promise<void>;
   createConsent(input: CreateConsentInput): Promise<ConsentRec>;
   listConsents(sessionId: string): Promise<ConsentRec[]>;
   getConsentsForApplication(sessionId: string, applicationId: string): Promise<ConsentRec[]>;
