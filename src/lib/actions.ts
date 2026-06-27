@@ -224,12 +224,22 @@ export async function regenerateRationaleAction(input: {
   return { ok: true as const, rationale: r.text, source: r.source, fellBack: r.fellBack };
 }
 
-// ---- live model evaluation (Gemini over the labelled set) ----
+// ---- live model evaluation (Gemini over a labelled sample) ----
 export async function runLiveEvalAction() {
   const { evaluateWithGemini } = await import("./llm");
   const { toEvalView } = await import("./eval");
-  const { result, source, fellBack } = await evaluateWithGemini();
-  return { ok: true as const, source, fellBack: fellBack ?? false, view: toEvalView(result) };
+  const r = await evaluateWithGemini();
+  return {
+    ok: true as const,
+    source: r.source,
+    fellBack: r.fellBack ?? false,
+    error: r.error ?? null,
+    sampled: r.sampled ?? false,
+    sampleSize: r.sampleSize ?? null,
+    totalAvailable: r.totalAvailable ?? null,
+    cache: r.cache ?? null,
+    view: toEvalView(r.result),
+  };
 }
 
 // ---- consent withdrawal (session apps; seed apps are visual-only in the UI) ----

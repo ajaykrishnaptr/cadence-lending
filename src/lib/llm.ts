@@ -4,10 +4,11 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { CATEGORY_KEYS } from "./categories";
 import { categoriseByRules } from "./categoriser/rules";
 import { CATEGORISER_SYSTEM, CATEGORISER_FEWSHOT } from "./categoriser/prompt";
-import { registerLiveCategoriser, type LiveCategoriseOutput } from "./cadence/categorise";
+import { registerLiveCategoriser, type CacheStats, type LiveCategoriseOutput } from "./cadence/categorise";
 import { cacheKey, getCatCache } from "./categoriser/cache";
 import { buildRationale } from "./rationale";
 import type { DecisionPackage } from "./engine";
+import type { EvalCase, EvalResult } from "./eval";
 import type { CategorisedTransaction, Transaction } from "./types";
 
 /**
@@ -20,6 +21,26 @@ import type { CategorisedTransaction, Transaction } from "./types";
 
 const MODEL_ID = "gemini-2.5-flash";
 const apiKey = process.env.GEMINI_API_KEY;
+
+/**
+ * Cap concurrent Gemini requests. The free tier is only a handful of requests
+ * per minute, so firing one request per 40-transaction batch all at once
+ * (e.g. ~24 at once for the full eval set) trips a 429 quota error and the
+ * whole run falls back to rules. Throttling keeps bursts under the limit.
+ */
+const GEMINI_MAX_CONCURRENCY = 3;
+
+/** Run `fn` over `items` with at most `limit` in flight at a time. */
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+}
 
 export function llmConfigured(): boolean {
   return Boolean(apiKey);
@@ -63,8 +84,10 @@ export async function categoriseWithGemini(
   const m = model();
   const out: CategorisedTransaction[] = new Array(txns.length);
 
-  await Promise.all(
-    chunk(txns.map((t, i) => ({ t, i })), 40).map(async (group) => {
+  await mapLimit(
+    chunk(txns.map((t, i) => ({ t, i })), 40),
+    GEMINI_MAX_CONCURRENCY,
+    async (group) => {
       const lines = group
         .map(({ t, i }) => `${i}: "${t.description}" amount ${t.amount.toFixed(2)} EUR (${t.direction})`)
         .join("\n");
@@ -93,7 +116,7 @@ export async function categoriseWithGemini(
             }
           : { ...t, categorisation: categoriseByRules(t), source: "rules" };
       }
-    }),
+    },
   );
 
   return out;
@@ -144,19 +167,65 @@ export async function categoriseWithGeminiCached(
 // register so the cadence categorise() gemini path is wired without a hard dep
 registerLiveCategoriser(categoriseWithGeminiCached);
 
-// ---- live evaluation (Gemini over the labelled set) ----
-export async function evaluateWithGemini() {
+// ---- live evaluation (Gemini over a labelled sample) ----
+
+/**
+ * One Gemini batch. The live eval runs a representative SAMPLE rather than all
+ * ~900 labelled lines: the free tier only allows a few requests per minute, so
+ * a full live eval would burst far past the limit and fail. Cached results make
+ * re-runs free. The rules baseline (shown on load) still scores the full set.
+ */
+const LIVE_EVAL_SAMPLE = 40;
+
+/** Deterministic sample: every hard case + a spread across the seeded set. */
+function sampleEvalCases(cases: EvalCase[], max: number): EvalCase[] {
+  const hard = cases.filter((c) => c.isHard);
+  const seeded = cases.filter((c) => !c.isHard);
+  const need = Math.max(0, max - hard.length);
+  if (need === 0 || seeded.length === 0) return [...hard, ...seeded].slice(0, max);
+  const stride = Math.max(1, Math.floor(seeded.length / need));
+  const picked: EvalCase[] = [];
+  for (let i = 0; i < seeded.length && picked.length < need; i += stride) picked.push(seeded[i]);
+  return [...hard, ...picked];
+}
+
+export interface LiveEvalResult {
+  result: EvalResult;
+  source: "gemini" | "rules";
+  fellBack?: boolean;
+  error?: string;
+  /** True when only a sample of the labelled set was scored live. */
+  sampled?: boolean;
+  sampleSize?: number;
+  totalAvailable?: number;
+  cache?: CacheStats;
+}
+
+export async function evaluateWithGemini(): Promise<LiveEvalResult> {
   const { getEvalCases, scoreCases, baselineEval } = await import("./eval");
-  const cases = getEvalCases();
   if (!llmConfigured()) {
-    return { result: baselineEval(), source: "rules" as const, fellBack: true };
+    return { result: baselineEval(), source: "rules", fellBack: true };
   }
+  const all = getEvalCases();
+  const sample = sampleEvalCases(all, LIVE_EVAL_SAMPLE);
   try {
-    const predicted = await categoriseWithGemini(cases.map((c) => c.transaction));
-    const result = scoreCases(cases, predicted.map((p) => p.categorisation));
-    return { result, source: "gemini" as const };
-  } catch {
-    return { result: baselineEval(), source: "rules" as const, fellBack: true };
+    const { transactions, cache } = await categoriseWithGeminiCached(sample.map((c) => c.transaction));
+    const result = scoreCases(sample, transactions.map((t) => t.categorisation));
+    return {
+      result,
+      source: "gemini",
+      sampled: sample.length < all.length,
+      sampleSize: sample.length,
+      totalAvailable: all.length,
+      cache,
+    };
+  } catch (err) {
+    return {
+      result: baselineEval(),
+      source: "rules",
+      fellBack: true,
+      error: err instanceof Error ? err.message : "Live evaluation failed",
+    };
   }
 }
 

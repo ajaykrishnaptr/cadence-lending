@@ -36,9 +36,20 @@ export function EvalReport({
       setView(res.view);
       setSource(res.source);
       if (res.fellBack || res.source === "rules") {
-        toast.warning("Ran the rules baseline", { description: llmConfigured ? "The live model call failed; showing the deterministic baseline." : "No GEMINI_API_KEY configured — showing the deterministic baseline." });
+        const rateLimited = /quota|rate.?limit|429|resource.?exhausted/i.test(res.error ?? "");
+        const description = !llmConfigured
+          ? "No GEMINI_API_KEY configured — showing the deterministic baseline."
+          : rateLimited
+            ? "Gemini rate limit reached (the free tier allows only a few requests per minute). Showing the deterministic baseline — try again in a minute."
+            : `The live model call failed${res.error ? ` (${res.error.slice(0, 120)})` : ""}. Showing the deterministic baseline.`;
+        toast.warning("Ran the rules baseline", { description });
       } else {
-        toast.success("Live evaluation complete", { description: `Gemini categorised ${res.view.total} labelled transactions.` });
+        const c = res.cache;
+        const cacheNote = c ? (c.misses === 0 ? " (all from cache — no model calls)" : ` (${c.hits} cached, ${c.misses} live)`) : "";
+        const desc = res.sampled
+          ? `Gemini scored a ${res.view.total}-transaction sample of ${res.totalAvailable} labelled lines${cacheNote}.`
+          : `Gemini categorised ${res.view.total} labelled transactions${cacheNote}.`;
+        toast.success("Live evaluation complete", { description: desc });
       }
     });
   }
