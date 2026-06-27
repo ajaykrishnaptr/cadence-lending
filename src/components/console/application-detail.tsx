@@ -13,11 +13,18 @@ import {
   Building2,
   PiggyBank,
   Lock,
+  Fingerprint,
+  Scale,
+  Gavel,
+  CheckCircle2,
+  AlertTriangle,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { DecisionPackage } from "@/lib/engine";
 import type { Account, CategorisedTransaction, CategoriserSource, DecisionOutcome } from "@/lib/types";
 import type { ConsentView } from "@/lib/cadence/applications";
+import type { OriginationChecks, OriginationCheck } from "@/lib/origination";
 import type { DecisionRec } from "@/lib/store";
 import { formatEUR, formatSigned, formatDate, formatDateTime, maskIban, daysUntil } from "@/lib/format";
 import { purposeLabel } from "@/lib/labels";
@@ -56,6 +63,8 @@ export interface DetailProps {
   consents: ConsentView[];
   officerDecision: DecisionRec | null;
   initialRationale: string;
+  checks: OriginationChecks;
+  humanReviewRequested: boolean;
 }
 
 export function ApplicationDetail(props: DetailProps) {
@@ -93,6 +102,7 @@ export function ApplicationDetail(props: DetailProps) {
             <TabsTrigger value="income">Income</TabsTrigger>
             <TabsTrigger value="obligations">Obligations</TabsTrigger>
             <TabsTrigger value="affordability">Affordability</TabsTrigger>
+            <TabsTrigger value="checks">Checks &amp; governance</TabsTrigger>
             <TabsTrigger value="decision">Decision</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="mt-5">
@@ -117,6 +127,9 @@ export function ApplicationDetail(props: DetailProps) {
           </TabsContent>
           <TabsContent value="affordability" className="mt-5">
             <AffordabilityTab decision={decision} />
+          </TabsContent>
+          <TabsContent value="checks" className="mt-5">
+            <ChecksTab checks={props.checks} decision={decision} humanReviewRequested={props.humanReviewRequested} />
           </TabsContent>
           <TabsContent value="decision" className="mt-5">
             <DecisionTab {...props} />
@@ -602,6 +615,93 @@ function MiniStat({ label, value, hint }: { label: string; value: string; hint?:
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="font-heading text-base font-semibold tabular-nums">{value}</div>
       {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
+    </div>
+  );
+}
+
+// ---------------- Checks & governance ----------------
+function CheckIcon({ id }: { id: string }) {
+  const cls = "h-4 w-4";
+  if (id === "identity") return <Fingerprint className={cls} />;
+  if (id === "sanctions") return <Scale className={cls} />;
+  if (id === "aml") return <ShieldCheck className={cls} />;
+  if (id === "fraud") return <Lock className={cls} />;
+  return <UserCheck className={cls} />; // income
+}
+
+function CheckStatusPill({ status }: { status: OriginationCheck["status"] }) {
+  const map = {
+    pass: { label: "Pass", cls: "bg-success-muted text-success-foreground ring-success/30", Icon: CheckCircle2 },
+    review: { label: "Review", cls: "bg-warning-muted text-warning-foreground ring-warning/30", Icon: AlertTriangle },
+    fail: { label: "Fail", cls: "bg-danger-muted text-danger-foreground ring-danger/30", Icon: AlertTriangle },
+  }[status];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", map.cls)}>
+      <map.Icon className="h-3 w-3" /> {map.label}
+    </span>
+  );
+}
+
+function ChecksTab({ checks, decision, humanReviewRequested }: { checks: OriginationChecks; decision: DetailProps["decision"]; humanReviewRequested: boolean }) {
+  return (
+    <div className="space-y-6">
+      {/* Onboarding / compliance checks */}
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="font-heading text-sm font-semibold">Onboarding &amp; compliance checks</h3>
+          <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", checks.allClear ? "bg-success-muted text-success-foreground ring-success/30" : "bg-warning-muted text-warning-foreground ring-warning/30")}>
+            {checks.allClear ? "All gates clear" : "Attention needed"}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">Prerequisites and corroboration around the scored decision — KYC/AML, fraud and income verification. These gate origination but are not inputs to the affordability engine. Synthetic in this demo.</p>
+        <div className="mt-4 space-y-2">
+          {checks.checks.map((c) => (
+            <div key={c.id} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"><CheckIcon id={c.id} /></span>
+                <div>
+                  <div className="text-sm font-medium">{c.label}</div>
+                  <div className="text-xs text-muted-foreground">{c.detail}</div>
+                </div>
+              </div>
+              <CheckStatusPill status={c.status} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* GDPR Art. 22 governance */}
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-muted text-brand"><Gavel className="h-4 w-4" /></span>
+          <h3 className="font-heading text-sm font-semibold">Automated decision — GDPR Art. 22</h3>
+        </div>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This recommendation (<span className="font-medium text-foreground">{decision.outcomeLabel}</span>) was produced by a fully automated process — the deterministic affordability engine plus the credit-bureau rule, with no human in the loop. That makes it a decision under <span className="font-medium text-foreground">GDPR Art. 22</span>.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <GovCard title="Legal basis" body="Art. 22(2)(a) — necessary for entering into / performing the loan contract the applicant requested." />
+          <GovCard title="§31 BDSG (scoring)" body={`The bureau score (${decision.bureau ? `${decision.bureau.score}/100` : "n/a"}) is one input among bank-statement affordability evidence — not the sole basis, as §31 BDSG requires.`} />
+          <GovCard title="Safeguards — Art. 22(3)" body="The applicant has the right to obtain human intervention, to express their point of view, and to contest the decision." />
+          <GovCard title="Explainability" body="Every rule exposes its inputs and threshold on the Decision tab; the rationale is grounded strictly in those figures." />
+        </div>
+        <div className={cn("mt-4 flex items-start gap-2.5 rounded-lg border p-3", humanReviewRequested ? "border-warm/40 bg-warm-muted/30" : "bg-muted/40")}>
+          {humanReviewRequested ? <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-warm" /> : <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+          <div className="text-xs">
+            <div className="font-medium">{humanReviewRequested ? "Human review requested by the applicant" : "Human-review path available"}</div>
+            <p className="mt-0.5 text-muted-foreground">{humanReviewRequested ? "The applicant exercised their Art. 22(3) right — this application was escalated to an underwriter (status: referred). An officer must record the final decision below." : "If the applicant requests it, the case is escalated to an underwriter. An officer can also override the engine on the Decision tab at any time."}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GovCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="text-xs font-medium">{title}</div>
+      <p className="mt-1 text-xs text-muted-foreground">{body}</p>
     </div>
   );
 }

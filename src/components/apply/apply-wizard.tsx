@@ -19,6 +19,7 @@ import {
   Sparkles,
   FileSearch,
   AlertTriangle,
+  Gavel,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { PersonaProfile, LoanPurpose, ConsentScope } from "@/lib/types";
@@ -27,7 +28,7 @@ import { BANK_DIRECTORY, bankName, getBank } from "@/lib/demo-bank/banks";
 import { CONSUMER_LOAN, monthlyInstalment } from "@/lib/engine/config";
 import { formatEUR, maskIban } from "@/lib/format";
 import { purposeLabel, PURPOSE_LABELS } from "@/lib/labels";
-import { submitApplication, loginAs, suggestBanksAction, queryRegistryAction } from "@/lib/actions";
+import { submitApplication, loginAs, suggestBanksAction, queryRegistryAction, requestHumanReviewAction } from "@/lib/actions";
 import { CadenceMark } from "@/components/cadence-logo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -154,7 +155,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
       )}
 
       {step === 5 && (
-        <DoneStep persona={persona} amount={amount} term={term} purpose={purpose} banks={connected} onConsole={openConsole} pending={pending} />
+        <DoneStep persona={persona} amount={amount} term={term} purpose={purpose} banks={connected} appId={resultAppId} onConsole={openConsole} pending={pending} />
       )}
     </div>
   );
@@ -664,8 +665,22 @@ function Info({ icon, title, body }: { icon: React.ReactNode; title: string; bod
   );
 }
 
-// ---- Step 4: Done ----
-function DoneStep({ persona, amount, term, purpose, banks, onConsole, pending }: { persona: PersonaProfile; amount: number; term: number; purpose: LoanPurpose; banks: string[]; onConsole: () => void; pending: boolean }) {
+// ---- Step 5: Done ----
+function DoneStep({ persona, amount, term, purpose, banks, appId, onConsole, pending }: { persona: PersonaProfile; amount: number; term: number; purpose: LoanPurpose; banks: string[]; appId: string | null; onConsole: () => void; pending: boolean }) {
+  const [reviewState, setReviewState] = useState<"idle" | "done">("idle");
+  const [reviewing, startReview] = useTransition();
+
+  function requestReview() {
+    if (!appId) return;
+    startReview(async () => {
+      const res = await requestHumanReviewAction({ applicationId: appId });
+      if (res.ok) {
+        setReviewState("done");
+        toast.success("Human review requested", { description: "Your application was escalated to an underwriter (GDPR Art. 22)." });
+      }
+    });
+  }
+
   return (
     <Card className="text-center">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success-muted text-success-foreground">
@@ -678,11 +693,30 @@ function DoneStep({ persona, amount, term, purpose, banks, onConsole, pending }:
       <div className="mx-auto mt-5 max-w-sm rounded-xl border bg-muted/30 p-4 text-left text-sm">
         <p className="font-medium">What happens next</p>
         <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
-          <li>· The affordability engine has already produced a recommendation.</li>
+          <li>· The affordability engine + credit-bureau check produced a recommendation.</li>
           <li>· A loan officer reviews the explainable assessment and confirms or overrides.</li>
           <li>· Every step is in the append-only audit log.</li>
         </ul>
       </div>
+
+      {/* GDPR Art. 22 right to human review */}
+      <div className="mx-auto mt-4 max-w-sm rounded-xl border border-brand/30 bg-brand-muted/30 p-4 text-left">
+        <div className="flex items-center gap-2">
+          <Gavel className="h-4 w-4 shrink-0 text-brand" />
+          <p className="text-sm font-medium">An automated decision was made</p>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The recommendation was produced automatically. Under GDPR Art. 22 you can request a human review, express your view, and contest it.
+        </p>
+        {reviewState === "done" ? (
+          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-success-foreground"><CheckCircle2 className="h-3.5 w-3.5" /> Human review requested — escalated to an underwriter.</p>
+        ) : (
+          <Button size="sm" variant="outline" className="mt-3" onClick={requestReview} disabled={reviewing || !appId}>
+            {reviewing ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Requesting…</> : "Request human review"}
+          </Button>
+        )}
+      </div>
+
       <Button className="mt-6" size="lg" onClick={onConsole} disabled={pending}>
         {pending ? "Opening…" : <>Open the officer console <ArrowRight className="h-4 w-4" /></>}
       </Button>

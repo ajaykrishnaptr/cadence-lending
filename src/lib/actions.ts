@@ -7,6 +7,7 @@ import { getSessionId } from "./session";
 import { getStore } from "./store";
 import { getProfile, banksForPersona, bankName, detectConnectableBanks, queryCreditRegistry, creditBureauProfile } from "./demo-bank";
 import { getDecision, getCategorised } from "./cadence";
+import { originationChecks } from "./origination";
 import "./llm"; // side-effect: registers the live Gemini categoriser
 import { outcomeToStatus } from "./cadence/applications";
 import { CONSENT_PURPOSE, FULL_SCOPE } from "./cadence/applications";
@@ -104,6 +105,8 @@ export async function submitApplication(input: SubmitInput) {
   });
 
   // 3. audit trail for the full flow
+  const checks = originationChecks(input.personaId, decision);
+  const incomeCheck = checks.checks.find((c) => c.id === "income");
   const events: { type: string; message: string; actor: "applicant" | "system"; meta?: Record<string, unknown> }[] = [
     ...banks.map((bankId) => ({
       type: "consent.granted",
@@ -111,9 +114,10 @@ export async function submitApplication(input: SubmitInput) {
       actor: "applicant" as const,
       meta: { bankId, scope },
     })),
+    { type: "onboarding.kyc", message: `Onboarding checks ${checks.allClear ? "cleared" : "flagged"} — identity verified, sanctions/PEP no match, AML low risk, no fraud signals; income verification ${incomeCheck?.status ?? "pass"}.`, actor: "system", meta: { allClear: checks.allClear, checks: checks.checks.map((c) => ({ id: c.id, status: c.status })) } },
     { type: "data.pull", message: `Aggregated accounts and ~6 months of transactions across ${banks.length} bank${banks.length > 1 ? "s" : ""} (${banks.map(bankName).join(", ")}) via the AIS provider (Berlin Group NextGenPSD2).`, actor: "system", meta: { banks, standard: "Berlin Group NextGenPSD2 XS2A" } },
     { type: "categorisation", message: `Categorised ${decision.transactions.length} transactions (${decision.categoriserSource} categoriser).`, actor: "system", meta: { source: decision.categoriserSource, count: decision.transactions.length } },
-    { type: "decision.engine", message: `Affordability engine result: ${decision.outcomeLabel}.`, actor: "system", meta: { outcome: decision.outcome, recommendedLimit: decision.recommendedLimit } },
+    { type: "decision.automated", message: `Automated decision produced by the affordability engine + credit-bureau rule: ${decision.outcomeLabel}. Under GDPR Art. 22(3) the applicant may request human review.`, actor: "system", meta: { outcome: decision.outcome, recommendedLimit: decision.recommendedLimit, bureauScore: decision.bureau?.score ?? null, automated: true } },
     { type: "application.submitted", message: `Application submitted from a comparison-portal lead — €${request.amount.toLocaleString("de-DE")} over ${request.termMonths} months.`, actor: "applicant" },
   ];
   for (const e of events) {
@@ -156,6 +160,28 @@ export async function recordOfficerDecision(input: {
     message: `Officer recorded decision: ${input.outcomeLabel}${input.note ? ` — ${input.note}` : ""}.`,
     actor: "officer",
     meta: { outcome: input.outcome, recommendedLimit: input.recommendedLimit },
+  });
+  revalidatePath(`/console/applications/${input.applicationId}`);
+  revalidatePath("/console");
+  return { ok: true as const };
+}
+
+// ---- GDPR Art. 22(3): applicant requests human review of the automated decision ----
+export async function requestHumanReviewAction(input: { applicationId: string }) {
+  const sid = await getSessionId();
+  const store = getStore();
+  const app = await store.getApplicationById(sid, input.applicationId);
+  // Seed/portfolio apps are read-only; only a real session application escalates.
+  if (app && app.source !== "seed") {
+    await store.updateApplicationStatus(sid, input.applicationId, "referred");
+  }
+  await store.appendAudit({
+    sessionId: sid,
+    applicationId: input.applicationId,
+    type: "art22.human_review_requested",
+    message: "Applicant exercised the GDPR Art. 22(3) right to human intervention — application escalated to an underwriter for manual review.",
+    actor: "applicant",
+    meta: { legalBasis: "GDPR Art. 22(3)" },
   });
   revalidatePath(`/console/applications/${input.applicationId}`);
   revalidatePath("/console");

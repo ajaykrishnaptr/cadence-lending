@@ -5,6 +5,7 @@ import { getDecision, getAccountData } from "@/lib/cadence";
 import { resolveApplication, getConsentViews, outcomeToStatus } from "@/lib/cadence/applications";
 import { getStore } from "@/lib/store";
 import { buildRationale } from "@/lib/rationale";
+import { originationChecks } from "@/lib/origination";
 import { ApplicationDetail } from "@/components/console/application-detail";
 
 export default async function ApplicationDetailPage({
@@ -30,6 +31,10 @@ export default async function ApplicationDetailPage({
   const latest = resolved.isSeed ? undefined : await getStore().latestDecision(sid, resolved.appId);
   const officerDecision = latest && latest.decidedBy === "officer" ? latest : null;
 
+  const auditRows = resolved.isSeed ? [] : await getStore().listAudit(sid, resolved.appId);
+  const humanReviewRequested = auditRows.some((a) => a.type === "art22.human_review_requested");
+  const checks = originationChecks(resolved.personaId, decision);
+
   const status = resolved.isSeed ? outcomeToStatus(decision.outcome) : resolved.status;
   const initialRationale = buildRationale(decision, profile.name);
 
@@ -54,6 +59,8 @@ export default async function ApplicationDetailPage({
       consents={consents}
       officerDecision={officerDecision}
       initialRationale={initialRationale}
+      checks={checks}
+      humanReviewRequested={humanReviewRequested}
     />
   );
 }
