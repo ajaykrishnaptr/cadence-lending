@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ROLE_COOKIE } from "@/middleware";
 import { getSessionId } from "./session";
 import { getStore } from "./store";
-import { getProfile, banksForPersona, bankName, detectConnectableBanks } from "./demo-bank";
+import { getProfile, banksForPersona, bankName, detectConnectableBanks, queryCreditRegistry } from "./demo-bank";
 import { getDecision, getCategorised } from "./cadence";
 import "./llm"; // side-effect: registers the live Gemini categoriser
 import { outcomeToStatus } from "./cadence/applications";
@@ -167,23 +167,43 @@ export async function suggestBanksAction(input: { personaId: string; connectedBa
   return { ok: true as const, suggestions: detectConnectableBanks(input.personaId, input.connectedBanks) };
 }
 
+// ---- Demo Credit Registry lookup (fictional bureau; cold-start discovery) ----
+export async function queryRegistryAction(input: { personaId: string }) {
+  const sid = await getSessionId();
+  const disclosures = queryCreditRegistry(input.personaId);
+  const banks = [...new Set(disclosures.map((d) => d.bankId))];
+  const creditCount = disclosures.filter((d) => d.isCredit).length;
+  await getStore().appendAudit({
+    sessionId: sid,
+    applicationId: null,
+    type: "registry.query",
+    message: `Demo Credit Registry consulted with consent (synthetic bureau) — disclosed ${disclosures.length} record${disclosures.length === 1 ? "" : "s"} (${creditCount} credit agreement${creditCount === 1 ? "" : "s"}) across ${banks.length} institution${banks.length === 1 ? "" : "s"}.`,
+    actor: "applicant",
+    meta: { banks, disclosures: disclosures.length, creditAgreements: creditCount },
+  });
+  return { ok: true as const, disclosures };
+}
+
 // ---- live re-categorisation (Gemini, with rules fallback) ----
 export async function recategoriseAction(input: { personaId: string }) {
   const sid = await getSessionId();
   const result = await getCategorised(input.personaId, "gemini");
+  const cache = result.cache;
+  const cacheNote = cache ? ` (${cache.hits} from cache, ${cache.misses} live model calls; ${cache.store} cache)` : "";
   await getStore().appendAudit({
     sessionId: sid,
     applicationId: null,
     type: "categorisation.live",
-    message: `Live re-categorisation requested — ran ${result.source} categoriser on ${result.transactions.length} transactions${result.fellBack ? " (fell back from Gemini)" : ""}.`,
+    message: `Live re-categorisation requested — ran ${result.source} categoriser on ${result.transactions.length} transactions${result.fellBack ? " (fell back from Gemini)" : cacheNote}.`,
     actor: "officer",
-    meta: { source: result.source, fellBack: result.fellBack ?? false, error: result.error ?? null },
+    meta: { source: result.source, fellBack: result.fellBack ?? false, error: result.error ?? null, cache: cache ?? null },
   });
   return {
     ok: true as const,
     source: result.source,
     fellBack: result.fellBack ?? false,
     error: result.error,
+    cache: cache ?? null,
     transactions: result.transactions,
   };
 }

@@ -17,15 +17,17 @@ import {
   Plus,
   Search,
   Sparkles,
+  FileSearch,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { PersonaProfile, LoanPurpose, ConsentScope } from "@/lib/types";
-import type { BankSuggestion } from "@/lib/demo-bank";
+import type { BankSuggestion, RegistryDisclosure } from "@/lib/demo-bank";
 import { BANK_DIRECTORY, bankName, getBank } from "@/lib/demo-bank/banks";
 import { CONSUMER_LOAN, monthlyInstalment } from "@/lib/engine/config";
 import { formatEUR, maskIban } from "@/lib/format";
 import { purposeLabel, PURPOSE_LABELS } from "@/lib/labels";
-import { submitApplication, loginAs, suggestBanksAction } from "@/lib/actions";
+import { submitApplication, loginAs, suggestBanksAction, queryRegistryAction } from "@/lib/actions";
 import { CadenceMark } from "@/components/cadence-logo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -33,7 +35,7 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["Offer", "Banks", "Consent", "Done"];
+const STEPS = ["Offer", "Discover", "Connect", "Consent", "Done"];
 const PURPOSES = Object.keys(PURPOSE_LABELS) as LoanPurpose[];
 const SCOPE_LABELS: Record<keyof ConsentScope, string> = {
   accounts: "Account list & details",
@@ -53,6 +55,8 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
   const [purpose, setPurpose] = useState<LoanPurpose>(persona.request.purpose);
   const [scope, setScope] = useState<ConsentScope>({ accounts: true, balances: true, transactions: true, standingOrders: true });
   const [connected, setConnected] = useState<string[]>([]);
+  const [disclosures, setDisclosures] = useState<RegistryDisclosure[]>([]);
+  const [discovered, setDiscovered] = useState<string[]>([]);
   const [resultAppId, setResultAppId] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -63,6 +67,8 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
     setTerm(p.request.termMonths);
     setPurpose(p.request.purpose);
     setConnected([]);
+    setDisclosures([]);
+    setDiscovered([]);
   }
 
   const instalment = useMemo(() => monthlyInstalment(amount, CONSUMER_LOAN.apr, term), [amount, term]);
@@ -80,7 +86,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
         return;
       }
       setResultAppId(res.applicationId);
-      setStep(4);
+      setStep(5);
     });
   }
 
@@ -113,28 +119,41 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
       )}
 
       {step === 2 && (
-        <BanksStep
+        <DiscoverStep
           persona={persona}
-          connected={connected}
-          setConnected={setConnected}
+          disclosures={disclosures}
+          setDisclosures={setDisclosures}
+          setDiscovered={setDiscovered}
           onBack={() => setStep(1)}
           onNext={() => setStep(3)}
         />
       )}
 
       {step === 3 && (
+        <BanksStep
+          persona={persona}
+          discovered={discovered}
+          disclosures={disclosures}
+          connected={connected}
+          setConnected={setConnected}
+          onBack={() => setStep(2)}
+          onNext={() => setStep(4)}
+        />
+      )}
+
+      {step === 4 && (
         <ConsentStep
           scope={scope}
           setScope={setScope}
           expiry={expiry}
           banks={connected}
           pending={pending}
-          onBack={() => setStep(2)}
+          onBack={() => setStep(3)}
           onGrant={submit}
         />
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <DoneStep persona={persona} amount={amount} term={term} purpose={purpose} banks={connected} onConsole={openConsole} pending={pending} />
       )}
     </div>
@@ -242,16 +261,18 @@ function OfferStep(props: {
           </div>
         </div>
         <Button className="mt-6 w-full" size="lg" onClick={props.onNext}>
-          Continue to bank connection <ArrowRight className="h-4 w-4" />
+          Continue <ArrowRight className="h-4 w-4" />
         </Button>
       </Card>
     </div>
   );
 }
 
-// ---- Step 2: Banks (picker + per-bank connect + IBAN nudge) ----
-function BanksStep({ persona, connected, setConnected, onBack, onNext }: {
+// ---- Step 3: Connect (per-bank consent for each disclosed bank + IBAN nudge) ----
+function BanksStep({ persona, discovered, disclosures, connected, setConnected, onBack, onNext }: {
   persona: PersonaProfile;
+  discovered: string[];
+  disclosures: RegistryDisclosure[];
   connected: string[];
   setConnected: (b: string[]) => void;
   onBack: () => void;
@@ -263,6 +284,14 @@ function BanksStep({ persona, connected, setConnected, onBack, onNext }: {
   const [query, setQuery] = useState("");
   const [, startSuggest] = useTransition();
   const primary = persona.banks[0];
+  // Banks the registry flagged (fallback: just the lead bank if the user skipped).
+  const recommended = discovered.length ? discovered : [primary];
+  const fromRegistry = discovered.length > 0;
+  const creditByBank = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of disclosures) if (d.isCredit) m.set(d.bankId, (m.get(d.bankId) ?? 0) + 1);
+    return m;
+  }, [disclosures]);
 
   function refreshSuggestions(conn: string[]) {
     startSuggest(async () => {
@@ -294,24 +323,41 @@ function BanksStep({ persona, connected, setConnected, onBack, onNext }: {
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><Landmark className="h-5 w-5" /></span>
         <div>
-          <h2 className="font-heading text-lg font-semibold">Connect your banks</h2>
-          <p className="text-sm text-muted-foreground">Cadence aggregates across every bank you connect. There&apos;s no central lookup of where you bank — you choose.</p>
+          <h2 className="font-heading text-lg font-semibold">Authorise each bank</h2>
+          <p className="text-sm text-muted-foreground">{fromRegistry ? "The registry found accounts at these banks. Grant Cadence read-only access to each — every bank authorises independently with its own SCA and consent." : "Cadence aggregates across every bank you connect. There's no central lookup of where you bank — you choose."}</p>
         </div>
       </div>
 
-      {/* Primary bank (from the lead) */}
-      {!connected.includes(primary) && (
-        <div className="mt-5 flex items-center justify-between rounded-xl border bg-muted/30 p-4">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background"><Building2 className="h-4 w-4" /></span>
-            <div>
-              <div className="text-sm font-medium">{bankName(primary)}</div>
-              <div className="text-xs text-muted-foreground">Your application came through this bank</div>
-            </div>
+      {/* Banks to connect — seeded from the registry disclosure (or the lead bank) */}
+      {recommended.filter((b) => !connected.includes(b)).length > 0 && (
+        <div className="mt-5">
+          {fromRegistry && <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Disclosed by the registry · consent needed</p>}
+          <div className="space-y-2">
+            {recommended.filter((b) => !connected.includes(b)).map((b) => {
+              const bank = getBank(b);
+              const credits = creditByBank.get(b) ?? 0;
+              const noData = bank ? !bank.hasData : false;
+              const sub = b === primary && !fromRegistry
+                ? "Your application came through this bank"
+                : credits > 0
+                  ? `${credits} credit agreement${credits > 1 ? "s" : ""} on file — connect to capture the obligation`
+                  : noData ? "No open-banking data available" : "Account relationship on file";
+              return (
+                <div key={b} className={cn("flex items-center justify-between rounded-xl border p-4", credits > 0 ? "border-warm/30 bg-warm-muted/30" : "bg-muted/30")}>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background"><Building2 className="h-4 w-4" /></span>
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm font-medium">{bankName(b)}{credits > 0 && <AlertTriangle className="h-3.5 w-3.5 text-warm" />}</div>
+                      <div className="text-xs text-muted-foreground">{sub}</div>
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => connectBank(b)} disabled={!!authorising || noData}>
+                    {authorising === b ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Authorising…</> : "Grant consent"}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
-          <Button size="sm" onClick={() => connectBank(primary)} disabled={!!authorising}>
-            {authorising === primary ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Authorising…</> : "Connect"}
-          </Button>
         </div>
       )}
 
@@ -400,6 +446,116 @@ function BanksStep({ persona, connected, setConnected, onBack, onNext }: {
         <Button variant="outline" className="w-28" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
         <Button className="flex-1" disabled={connected.length === 0 || !!authorising} onClick={onNext}>
           Continue to consent <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ---- Step 2: Discover (Demo Credit Registry — consent-gated cold-start) ----
+function groupDisclosures(disclosures: RegistryDisclosure[]) {
+  const order: string[] = [];
+  const byBank = new Map<string, RegistryDisclosure[]>();
+  for (const d of disclosures) {
+    if (!byBank.has(d.bankId)) { byBank.set(d.bankId, []); order.push(d.bankId); }
+    byBank.get(d.bankId)!.push(d);
+  }
+  return order.map((id) => ({ id, records: byBank.get(id)! }));
+}
+
+function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onBack, onNext }: {
+  persona: PersonaProfile;
+  disclosures: RegistryDisclosure[];
+  setDisclosures: (d: RegistryDisclosure[]) => void;
+  setDiscovered: (b: string[]) => void;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const [state, setState] = useState<"idle" | "loading" | "done">(disclosures.length ? "done" : "idle");
+
+  function search() {
+    if (state === "loading") return;
+    setState("loading");
+    // simulate the consent handshake + bureau lookup
+    setTimeout(async () => {
+      const res = await queryRegistryAction({ personaId: persona.id });
+      setDisclosures(res.disclosures);
+      setDiscovered([...new Set(res.disclosures.map((d) => d.bankId))]);
+      setState("done");
+    }, 850);
+  }
+
+  const banks = useMemo(() => groupDisclosures(disclosures), [disclosures]);
+  const creditCount = disclosures.filter((d) => d.isCredit).length;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileSearch className="h-5 w-5" /></span>
+        <div>
+          <h2 className="font-heading text-lg font-semibold">Find every bank you use</h2>
+          <p className="text-sm text-muted-foreground">With your consent, the Demo Credit Registry discloses the banks and credit agreements on your file — so we can prompt you to connect each one before the decision.</p>
+        </div>
+      </div>
+
+      {state !== "done" && (
+        <div className="mt-5 rounded-xl border bg-muted/30 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">Consent to a credit-registry lookup</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">A one-off, read-only check of your bank relationships. <span className="font-medium text-foreground">Demo Credit Registry</span> is a fictional bureau — synthetic data only, not a real scheme.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" onClick={search} disabled={state === "loading"}>
+                  {state === "loading"
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking with consent…</>
+                    : <><FileSearch className="h-3.5 w-3.5" /> Consent &amp; search the registry</>}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setDiscovered([]); onNext(); }} disabled={state === "loading"}>
+                  Skip — I&apos;ll add banks manually
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {state === "done" && (
+        <div className="mt-5 space-y-3">
+          <div className="flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-muted/40 px-3 py-2 text-xs">
+            <Sparkles className="h-4 w-4 shrink-0 text-brand" />
+            <span>Registry disclosed <span className="font-medium text-foreground">{banks.length} bank{banks.length > 1 ? "s" : ""}</span>{creditCount > 0 && <> and <span className="font-medium text-warm">{creditCount} credit agreement{creditCount > 1 ? "s" : ""}</span></>}. You&apos;ll authorise consent for each bank on the next step.</span>
+          </div>
+
+          {banks.map(({ id, records }) => (
+            <div key={id} className="rounded-xl border bg-card p-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-foreground/80 text-background"><Building2 className="h-4 w-4" /></span>
+                <span className="text-sm font-medium">{bankName(id)}</span>
+                {(records[0]?.hasData ?? getBank(id)?.hasData) ? null : <span className="text-[11px] text-muted-foreground">· no open-banking data</span>}
+              </div>
+              <ul className="mt-2 space-y-1">
+                {records.map((d, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-1.5">
+                      {d.isCredit ? <AlertTriangle className="h-3 w-3 text-warm" /> : <Landmark className="h-3 w-3 text-muted-foreground" />}
+                      <span className={cn("font-medium", d.isCredit && "text-warm")}>{d.relationship}</span>
+                      <span className="text-muted-foreground">· {d.detail}</span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{d.maskedRef} · since {d.since}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="text-[11px] text-muted-foreground">A credit agreement (⚠) may sit at a bank you would otherwise not connect — capturing it is exactly how the engine sees the full obligation picture.</p>
+        </div>
+      )}
+
+      <div className="mt-5 flex gap-2">
+        <Button variant="outline" className="w-28" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
+        <Button className="flex-1" disabled={state !== "done"} onClick={onNext}>
+          Continue to bank consent <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
     </Card>

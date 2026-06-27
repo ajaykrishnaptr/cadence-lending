@@ -4,7 +4,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { CATEGORY_KEYS } from "./categories";
 import { categoriseByRules } from "./categoriser/rules";
 import { CATEGORISER_SYSTEM, CATEGORISER_FEWSHOT } from "./categoriser/prompt";
-import { registerLiveCategoriser } from "./cadence/categorise";
+import { registerLiveCategoriser, type LiveCategoriseOutput } from "./cadence/categorise";
+import { cacheKey, getCatCache } from "./categoriser/cache";
 import { buildRationale } from "./rationale";
 import type { DecisionPackage } from "./engine";
 import type { CategorisedTransaction, Transaction } from "./types";
@@ -98,8 +99,50 @@ export async function categoriseWithGemini(
   return out;
 }
 
+/**
+ * Cache-aware live categoriser. Looks every line up in the persistent cache
+ * first, sends only the misses to Gemini, then writes the fresh model labels
+ * back. Re-running over an already-seen statement is a 100% cache hit and makes
+ * zero model calls. Only genuine model outputs are persisted — lines that fell
+ * back to rules inside categoriseWithGemini are never cached as if they were
+ * the model's answer. If the model call for the misses throws, the whole run
+ * throws so the caller falls back to the rules baseline (same as before).
+ */
+export async function categoriseWithGeminiCached(
+  txns: Transaction[],
+): Promise<LiveCategoriseOutput> {
+  const cache = getCatCache();
+  const keys = txns.map(cacheKey);
+  const cached = await cache.getMany(keys);
+
+  const out: CategorisedTransaction[] = new Array(txns.length);
+  const misses: { t: Transaction; i: number }[] = [];
+  txns.forEach((t, i) => {
+    const hit = cached.get(keys[i]);
+    if (hit) out[i] = { ...t, categorisation: hit, source: "gemini" };
+    else misses.push({ t, i });
+  });
+
+  if (misses.length) {
+    const fresh = await categoriseWithGemini(misses.map((m) => m.t));
+    const toPersist: { key: string; categorisation: CategorisedTransaction["categorisation"] }[] = [];
+    fresh.forEach((cat, j) => {
+      const { i } = misses[j];
+      out[i] = cat;
+      // only persist real model outputs, never per-line rules fallbacks
+      if (cat.source === "gemini") toPersist.push({ key: keys[i], categorisation: cat.categorisation });
+    });
+    if (toPersist.length) await cache.putMany(toPersist, MODEL_ID);
+  }
+
+  return {
+    transactions: out,
+    cache: { hits: txns.length - misses.length, misses: misses.length, store: cache.kind },
+  };
+}
+
 // register so the cadence categorise() gemini path is wired without a hard dep
-registerLiveCategoriser(categoriseWithGemini);
+registerLiveCategoriser(categoriseWithGeminiCached);
 
 // ---- live evaluation (Gemini over the labelled set) ----
 export async function evaluateWithGemini() {

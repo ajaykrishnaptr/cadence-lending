@@ -365,7 +365,15 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
         setTxns(res.transactions as CategorisedTransaction[]);
         setSource(res.source);
         if (res.fellBack) toast.warning("Fell back to rules baseline", { description: res.error ?? "Live model unavailable — using the deterministic categoriser." });
-        else toast.success("Re-categorised with live Gemini", { description: `${res.transactions.length} transactions relabelled.` });
+        else {
+          const c = res.cache;
+          const desc = c
+            ? c.misses === 0
+              ? `All ${res.transactions.length} lines served from the ${c.store} cache — zero model calls.`
+              : `${res.transactions.length} relabelled · ${c.hits} from cache, ${c.misses} live model call${c.misses > 1 ? "s" : ""}.`
+            : `${res.transactions.length} transactions relabelled.`;
+          toast.success("Re-categorised with live Gemini", { description: desc });
+        }
       } else {
         toast.error("Re-categorisation failed");
       }

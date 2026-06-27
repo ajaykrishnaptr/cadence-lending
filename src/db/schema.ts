@@ -1,7 +1,9 @@
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
+  real,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
@@ -69,6 +71,25 @@ export const auditEvents = pgTable("audit_events", {
   message: text("message").notNull(),
   actor: text("actor").notNull(), // applicant | officer | system
   meta: jsonb("meta"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Persistent categorisation cache. Global (NOT session-scoped) and never cleared
+ * by "reset my demo data" — it dedupes live Gemini calls across sessions. Keyed
+ * by a normalised description+amount+direction hash, so re-running the live
+ * categoriser over an already-seen statement costs zero model calls.
+ */
+export const categorisationCache = pgTable("categorisation_cache", {
+  key: text("key").primaryKey(),
+  category: text("category").notNull(),
+  subcategory: text("subcategory").notNull(),
+  confidence: real("confidence").notNull(),
+  isIncome: boolean("is_income").notNull(),
+  isRecurring: boolean("is_recurring").notNull(),
+  isObligation: boolean("is_obligation").notNull(),
+  /** Model id that produced this label (for cache invalidation on model change). */
+  model: text("model").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

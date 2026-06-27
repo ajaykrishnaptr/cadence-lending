@@ -1,6 +1,13 @@
 import { categoriseByRules } from "../categoriser/rules";
 import type { CategorisedTransaction, CategoriserSource, Transaction } from "../types";
 
+/** Hit/miss accounting for the persistent categorisation cache. */
+export interface CacheStats {
+  hits: number;
+  misses: number;
+  store: "neon" | "memory";
+}
+
 export interface CategoriseResult {
   transactions: CategorisedTransaction[];
   /** Which path actually produced the labels (surfaced in the UI). */
@@ -8,6 +15,8 @@ export interface CategoriseResult {
   /** Set when a requested live run fell back to the rules baseline. */
   fellBack?: boolean;
   error?: string;
+  /** Present on live (gemini) runs: how many lines came from the cache vs the model. */
+  cache?: CacheStats;
 }
 
 /**
@@ -17,9 +26,14 @@ export interface CategoriseResult {
  * which path ran. The Gemini implementation is injected from lib/llm to keep
  * this module free of provider dependencies.
  */
+export interface LiveCategoriseOutput {
+  transactions: CategorisedTransaction[];
+  cache?: CacheStats;
+}
+
 export type LiveCategoriser = (
   txns: Transaction[],
-) => Promise<CategorisedTransaction[]>;
+) => Promise<LiveCategoriseOutput>;
 
 let liveCategoriser: LiveCategoriser | null = null;
 
@@ -40,8 +54,8 @@ export async function categorise(
       return { transactions: categoriseWithRules(txns, "rules"), source: "rules", fellBack: true, error: "Live categoriser not configured" };
     }
     try {
-      const transactions = await liveCategoriser(txns);
-      return { transactions, source: "gemini" };
+      const out = await liveCategoriser(txns);
+      return { transactions: out.transactions, source: "gemini", cache: out.cache };
     } catch (err) {
       return {
         transactions: categoriseWithRules(txns, "rules"),
