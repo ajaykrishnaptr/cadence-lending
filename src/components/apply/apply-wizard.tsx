@@ -324,7 +324,7 @@ function BanksStep({ persona, discovered, disclosures, connected, setConnected, 
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><Landmark className="h-5 w-5" /></span>
         <div>
           <h2 className="font-heading text-lg font-semibold">Authorise each bank</h2>
-          <p className="text-sm text-muted-foreground">{fromRegistry ? "The registry found accounts at these banks. Grant Cadence read-only access to each — every bank authorises independently with its own SCA and consent." : "Cadence aggregates across every bank you connect. There's no central lookup of where you bank — you choose."}</p>
+          <p className="text-sm text-muted-foreground">{fromRegistry ? "The registry pointed to these banks. Grant Cadence read-only PSD2 access to each — every bank authorises independently with its own SCA and consent." : "Cadence aggregates across every bank you connect. There's no central lookup of where you bank — you choose."}</p>
         </div>
       </div>
 
@@ -493,8 +493,8 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileSearch className="h-5 w-5" /></span>
         <div>
-          <h2 className="font-heading text-lg font-semibold">Find every bank you use</h2>
-          <p className="text-sm text-muted-foreground">With your consent, the Demo Credit Registry discloses the banks and credit agreements on your file — so we can prompt you to connect each one before the decision.</p>
+          <h2 className="font-heading text-lg font-semibold">Surface your credit agreements</h2>
+          <p className="text-sm text-muted-foreground">With your consent, the Demo Credit Registry discloses the credit agreements and known account relationships on your credit file — which hints at the banks worth connecting before the decision.</p>
         </div>
       </div>
 
@@ -504,7 +504,7 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
             <div className="flex-1">
               <p className="text-sm font-medium">Consent to a credit-registry lookup</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">A one-off, read-only check of your bank relationships. <span className="font-medium text-foreground">Demo Credit Registry</span> is a fictional bureau — synthetic data only, not a real scheme.</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">A one-off, read-only check of your credit file — the credit agreements and account relationships on record (no balances or transactions). <span className="font-medium text-foreground">Demo Credit Registry</span> is a fictional bureau — synthetic data only, not a real scheme.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="sm" onClick={search} disabled={state === "loading"}>
                   {state === "loading"
@@ -524,7 +524,7 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
         <div className="mt-5 space-y-3">
           <div className="flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-muted/40 px-3 py-2 text-xs">
             <Sparkles className="h-4 w-4 shrink-0 text-brand" />
-            <span>Registry disclosed <span className="font-medium text-foreground">{banks.length} bank{banks.length > 1 ? "s" : ""}</span>{creditCount > 0 && <> and <span className="font-medium text-warm">{creditCount} credit agreement{creditCount > 1 ? "s" : ""}</span></>}. You&apos;ll authorise consent for each bank on the next step.</span>
+            <span>{creditCount > 0 && <><span className="font-medium text-warm">{creditCount} credit agreement{creditCount > 1 ? "s" : ""}</span> and </>}account relationships across <span className="font-medium text-foreground">{banks.length} institution{banks.length > 1 ? "s" : ""}</span>. You&apos;ll authorise PSD2 consent per bank on the next step to pull the actual data.</span>
           </div>
 
           {banks.map(({ id, records }) => (
@@ -548,7 +548,7 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
               </ul>
             </div>
           ))}
-          <p className="text-[11px] text-muted-foreground">A credit agreement (⚠) may sit at a bank you would otherwise not connect — capturing it is exactly how the engine sees the full obligation picture.</p>
+          <p className="text-[11px] text-muted-foreground">A credit agreement (⚠) may sit at a bank you would otherwise not connect — capturing it is exactly how the engine sees the full obligation picture. A credit file reflects credit-relevant records, not a guaranteed-complete list of accounts, so the IBAN nudge and manual add stay available on the next step.</p>
         </div>
       )}
 
