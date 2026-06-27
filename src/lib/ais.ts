@@ -51,7 +51,9 @@ async function resolveBaseUrl(): Promise<string> {
   } catch {
     /* not in a request scope */
   }
-  return "http://localhost:3000";
+  // last-resort fallback for non-request contexts; the request host above
+  // resolves in practice (dev and production alike).
+  return `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
 }
 
 class DemoBankAisProvider implements AisProvider {

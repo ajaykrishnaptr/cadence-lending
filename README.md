@@ -53,7 +53,7 @@ model only categorises transactions and drafts a grounded rationale.
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+npm run dev          # starts the local dev server
 ```
 
 The app runs **without any credentials** — it uses an in-memory store and the

@@ -120,8 +120,8 @@ export const HARD_CASES: HardCase[] = [
   },
   {
     id: "hard-12",
-    description: "SofortSplit Monatsrate",
-    counterparty: "SofortSplit",
+    description: "RatenFlex Monatsrate",
+    counterparty: "RatenFlex",
     amount: -55,
     bookingDate: "2026-06-10",
     truth: "bnpl",

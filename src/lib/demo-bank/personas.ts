@@ -148,7 +148,7 @@ export const PROFILES: ProfileSpec[] = [
     recurring: [
       { desc: "Miete", counterparty: "GWG Dortmund", amount: 1100, day: 1, category: "rent" },
       { desc: "KreditWerk Ratenkredit", counterparty: "KreditWerk", amount: 450, day: 4, category: "loan-repayment" },
-      { desc: "SofortSplit Rate", counterparty: "SofortSplit", amount: 180, day: 10, category: "bnpl" },
+      { desc: "RatenFlex Rate", counterparty: "RatenFlex", amount: 180, day: 10, category: "bnpl" },
       { desc: "QuickCash Rahmenkredit", counterparty: "QuickCash", amount: 120, day: 16, category: "other-credit" },
       { desc: "Stadtwerke Ruhr Strom", amount: 96, day: 6, category: "utilities" },
       { desc: "MobilEins Mobilfunk", amount: 42, day: 12, category: "utilities" },

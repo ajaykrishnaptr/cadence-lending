@@ -29,7 +29,7 @@ const CREDIT_RULES: Rule[] = [
 const DEBIT_RULES: Rule[] = [
   { test: /miete/i, category: "rent", confidence: 0.96, recurring: true },
   { test: /ratenkredit|darlehen|finanzierung|leasing|werkzeug finanz/i, category: "loan-repayment", confidence: 0.9, recurring: true },
-  { test: /sofortsplit|paylater|ratenfix|raten\b/i, category: "bnpl", confidence: 0.88, recurring: true },
+  { test: /ratenflex|paylater|ratenfix|raten\b/i, category: "bnpl", confidence: 0.88, recurring: true },
   { test: /rahmenkredit|quickcash|dispokredit/i, category: "other-credit", confidence: 0.8, recurring: true },
   { test: /strom|gas|energie|stadtwerke|volthaus|internet|netzklar|fasernet|mobilfunk|mobileins/i, category: "utilities", confidence: 0.9, recurring: true },
   { test: /versicherung|assur|haftpflicht|hausrat|kfz|kranken|schildvers/i, category: "insurance", confidence: 0.9, recurring: true },

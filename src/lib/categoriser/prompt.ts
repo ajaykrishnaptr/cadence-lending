@@ -13,7 +13,7 @@ Allowed categories: ${CATEGORY_KEYS.join(", ")}.`;
 export const CATEGORISER_FEWSHOT = `Examples:
 - "Lohn/Gehalt Muster GmbH", +3200, monthly -> salary, isIncome true, isRecurring true, confidence 0.97
 - "Miete Wohnung", -950, monthly -> rent, isObligation true, isRecurring true, confidence 0.95
-- "SofortSplit Rate", -180, monthly -> bnpl, isObligation true, isRecurring true, confidence 0.9
+- "RatenFlex Rate", -180, monthly -> bnpl, isObligation true, isRecurring true, confidence 0.9
 - "Markthalle Kartenzahlung", -47, irregular -> groceries, confidence 0.85
 - "Übertrag eigenes Sparkonto", -250 -> transfer, confidence 0.8
 - "LuckySpin Einzahlung", -40 -> gambling, confidence 0.92`;
