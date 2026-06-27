@@ -30,6 +30,8 @@ import { Stat } from "@/components/brand/stat";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CATEGORY_META } from "@/lib/categories";
+import { bankName } from "@/lib/demo-bank/banks";
+import { Landmark } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface DetailMeta {
@@ -191,25 +193,8 @@ function OverviewTab({ accounts, balanceSeries, consent, decision, meta, withdra
   return (
     <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
       <div className="space-y-5">
-        {/* Accounts */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {accounts.map((a) => (
-            <div key={a.id} className="rounded-xl border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-muted text-brand">
-                  {a.type === "checking" ? <Building2 className="h-4 w-4" /> : <PiggyBank className="h-4 w-4" />}
-                </span>
-                <div>
-                  <div className="text-sm font-medium">{a.name}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">{withdrawn ? "•••• hidden" : maskIban(a.iban)}</div>
-                </div>
-              </div>
-              <div className="mt-3 font-heading text-xl font-semibold tabular-nums">
-                {withdrawn ? "—" : formatEUR(a.balance)}
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* Accounts grouped by ASPSP (multibanking) */}
+        <AccountsByBank accounts={accounts} withdrawn={withdrawn} />
         {/* Balance chart */}
         <div className="rounded-xl border bg-card p-4">
           <div className="mb-2 text-sm font-medium">Checking balance · last 6 months</div>
@@ -269,6 +254,45 @@ function OverviewTab({ accounts, balanceSeries, consent, decision, meta, withdra
   );
 }
 
+function AccountsByBank({ accounts, withdrawn }: { accounts: Account[]; withdrawn: boolean }) {
+  const banks = [...new Set(accounts.map((a) => a.bankId))];
+  return (
+    <div className="space-y-4">
+      {banks.length > 1 && (
+        <div className="flex items-center gap-2 rounded-lg border border-brand/25 bg-brand-muted/40 px-3 py-2 text-xs font-medium text-brand">
+          <Landmark className="h-3.5 w-3.5 shrink-0" />
+          Aggregated across {banks.length} banks via open banking — {banks.map(bankName).join(" + ")}
+        </div>
+      )}
+      {banks.map((bankId) => (
+        <div key={bankId}>
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <Landmark className="h-3.5 w-3.5" /> {bankName(bankId)}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {accounts.filter((a) => a.bankId === bankId).map((a) => (
+              <div key={a.id} className="rounded-xl border bg-card p-4">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-muted text-brand">
+                    {a.type === "checking" ? <Building2 className="h-4 w-4" /> : <PiggyBank className="h-4 w-4" />}
+                  </span>
+                  <div>
+                    <div className="text-sm font-medium">{a.name}</div>
+                    <div className="font-mono text-[11px] text-muted-foreground">{withdrawn ? "•••• hidden" : maskIban(a.iban)}</div>
+                  </div>
+                </div>
+                <div className="mt-3 font-heading text-xl font-semibold tabular-nums">
+                  {withdrawn ? "—" : formatEUR(a.balance)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function HiddenPanel() {
   return (
     <div className="flex h-[150px] flex-col items-center justify-center gap-2 rounded-lg bg-muted/40 text-muted-foreground">
@@ -300,6 +324,7 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
   );
   const shown = filter === "all" ? sorted : sorted.filter((t) => t.categorisation.category === filter);
   const cats = useMemo(() => [...new Set(txns.map((t) => t.categorisation.category))], [txns]);
+  const multiBank = useMemo(() => new Set(txns.map((t) => t.bankId).filter(Boolean)).size > 1, [txns]);
 
   function recategorise() {
     start(async () => {
@@ -354,7 +379,14 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
             {shown.map((t) => (
               <tr key={t.id} className="border-t transition-colors hover:bg-muted/30">
                 <td className="whitespace-nowrap px-3 py-2 text-xs tabular-nums text-muted-foreground">{formatDate(t.bookingDate)}</td>
-                <td className="max-w-[260px] truncate px-3 py-2">{t.description}</td>
+                <td className="max-w-[260px] px-3 py-2">
+                  <div className="truncate">{t.description}</div>
+                  {multiBank && t.bankId && (
+                    <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <Landmark className="h-2.5 w-2.5" /> {bankName(t.bankId)}
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2"><CategoryBadge category={t.categorisation.category} /></td>
                 <td className="hidden px-3 py-2 sm:table-cell"><ConfidenceBar value={t.categorisation.confidence} /></td>
                 <td className={cn("px-3 py-2 text-right font-mono text-xs tabular-nums", t.amount >= 0 ? "text-success-foreground" : "text-foreground")}>{formatSigned(t.amount)}</td>

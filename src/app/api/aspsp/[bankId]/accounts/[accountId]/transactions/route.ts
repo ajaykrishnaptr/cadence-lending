@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
-import { getBgTransactions, personaForAccount } from "@/lib/demo-bank";
+import { bankExists, getBgTransactions, personaForAccount } from "@/lib/demo-bank";
 import type { BgTransactionsResponse } from "@/lib/psd2";
 
-/**
- * Demo Bank (mock ASPSP) — Berlin Group "Read Transaction List".
- *   GET /api/demo-bank/accounts/{accountId}/transactions
- * Returns raw booked/pending lines only — categorisation is Cadence's job.
- */
+/** Mock ASPSP — Berlin Group "Read Transaction List". */
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ accountId: string }> },
+  { params }: { params: Promise<{ bankId: string; accountId: string }> },
 ) {
-  const { accountId } = await params;
+  const { bankId, accountId } = await params;
   const persona = personaForAccount(accountId);
-  const result = persona ? getBgTransactions(persona, accountId) : undefined;
+  const result = bankExists(bankId) && persona ? getBgTransactions(persona, accountId) : undefined;
   if (!result) {
     return NextResponse.json(
       { tppMessages: [{ category: "ERROR", code: "RESOURCE_UNKNOWN" }] },
@@ -25,9 +21,7 @@ export async function GET(
     transactions: {
       booked: result.booked,
       pending: result.pending,
-      _links: {
-        account: { href: `/api/demo-bank/accounts/${accountId}` },
-      },
+      _links: { account: { href: `/api/aspsp/${bankId}/accounts/${accountId}` } },
     },
   };
   return NextResponse.json(body);

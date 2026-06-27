@@ -5,6 +5,8 @@ import {
   type BgAccountsResponse,
   type BgTransactionsResponse,
 } from "./psd2";
+import { banksForPersona } from "./demo-bank/personas";
+import { PRIMARY_BANK } from "./demo-bank/banks";
 import type { Account, Transaction } from "./types";
 
 /**
@@ -60,63 +62,88 @@ async function resolveBaseUrl(): Promise<string> {
   return `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
 }
 
-class DemoBankAisProvider implements AisProvider {
-  readonly name = "Demo Bank (mock ASPSP) · Berlin Group NextGenPSD2";
+/**
+ * Aggregates across every ASPSP the applicant banks with. For each connected
+ * bank it performs a real Berlin Group call, then merges the results into one
+ * cross-institution picture for the categoriser and engine — which is the whole
+ * value of open banking.
+ */
+class AggregatingAisProvider implements AisProvider {
+  readonly name = "Cadence AIS aggregator · Berlin Group NextGenPSD2";
+
+  private async fetchBankAccounts(
+    base: string,
+    bankId: string,
+    accountHolder: string,
+    withBalance: boolean,
+  ): Promise<BgAccountsResponse> {
+    const res = await fetch(
+      `${base}/api/aspsp/${bankId}/accounts?psu=${encodeURIComponent(accountHolder)}${withBalance ? "&withBalance=true" : ""}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) throw new Error(`AIS getAccounts(${bankId}) failed: ${res.status}`);
+    return res.json();
+  }
 
   async getAccounts(accountHolder: string): Promise<AisAccountsResult> {
     const base = await resolveBaseUrl();
-    const res = await fetch(
-      `${base}/api/demo-bank/accounts?psu=${encodeURIComponent(accountHolder)}&withBalance=true`,
-      { cache: "no-store" },
+    const banks = banksForPersona(accountHolder);
+    const accounts: Account[] = [];
+    await Promise.all(
+      banks.map(async (bankId) => {
+        const body = await this.fetchBankAccounts(base, bankId, accountHolder, true);
+        for (const bg of body.accounts) accounts.push(parseBgAccount(bg, bankId));
+      }),
     );
-    if (!res.ok) throw new Error(`AIS getAccounts failed: ${res.status}`);
-    const body = (await res.json()) as BgAccountsResponse;
-    return {
-      aspsp: "Demo Bank",
-      accountHolder,
-      accounts: body.accounts.map(parseBgAccount),
-    };
+    return { aspsp: "Cadence aggregator", accountHolder, accounts };
   }
 
   async getTransactions(accountHolder: string): Promise<AisTransactionsResult> {
     const base = await resolveBaseUrl();
+    const banks = banksForPersona(accountHolder);
 
-    // 1. discover accounts, then follow the checking account's transactions link
-    const accRes = await fetch(
-      `${base}/api/demo-bank/accounts?psu=${encodeURIComponent(accountHolder)}`,
-      { cache: "no-store" },
+    const transactions: Transaction[] = [];
+    let balanceSeries: BalancePoint[] = [];
+    let primaryAccountId = "";
+
+    await Promise.all(
+      banks.map(async (bankId) => {
+        const accBody = await this.fetchBankAccounts(base, bankId, accountHolder, false);
+        // statement lines live on current accounts (CACC)
+        const checking = accBody.accounts.filter((a) => a.cashAccountType === "CACC");
+        await Promise.all(
+          checking.map(async (acc) => {
+            const href =
+              acc._links?.transactions?.href ??
+              `/api/aspsp/${bankId}/accounts/${acc.resourceId}/transactions`;
+            const txRes = await fetch(`${base}${href}`, { cache: "no-store" });
+            if (!txRes.ok) throw new Error(`AIS getTransactions(${bankId}) failed: ${txRes.status}`);
+            const txBody = (await txRes.json()) as BgTransactionsResponse;
+            const parsed = txBody.transactions.booked.map((t) =>
+              parseBgTransaction(t, acc.resourceId, bankId),
+            );
+            for (const { balanceAfter: _b, ...t } of parsed) transactions.push(t);
+            // the primary bank's main account drives the balance trend chart
+            if (bankId === PRIMARY_BANK && !primaryAccountId) {
+              primaryAccountId = acc.resourceId;
+              balanceSeries = parsed
+                .filter((t) => t.balanceAfter !== undefined)
+                .map((t) => ({ date: t.bookingDate, balance: t.balanceAfter as number }));
+            }
+          }),
+        );
+      }),
     );
-    if (!accRes.ok) throw new Error(`AIS getAccounts failed: ${accRes.status}`);
-    const accBody = (await accRes.json()) as BgAccountsResponse;
-    const checking =
-      accBody.accounts.find((a) => a.cashAccountType === "CACC") ??
-      accBody.accounts[0];
-    if (!checking) {
-      return { aspsp: "Demo Bank", accountHolder, accountId: "", transactions: [], balanceSeries: [] };
-    }
 
-    const href = checking._links?.transactions?.href ??
-      `/api/demo-bank/accounts/${checking.resourceId}/transactions`;
-    const txRes = await fetch(`${base}${href}`, { cache: "no-store" });
-    if (!txRes.ok) throw new Error(`AIS getTransactions failed: ${txRes.status}`);
-    const txBody = (await txRes.json()) as BgTransactionsResponse;
-
-    const parsed = txBody.transactions.booked.map((t) =>
-      parseBgTransaction(t, checking.resourceId),
-    );
-    const transactions: Transaction[] = parsed.map(({ balanceAfter: _b, ...t }) => t);
-    const balanceSeries: BalancePoint[] = parsed
-      .filter((t) => t.balanceAfter !== undefined)
-      .map((t) => ({ date: t.bookingDate, balance: t.balanceAfter as number }));
-
+    transactions.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : 1));
     return {
-      aspsp: "Demo Bank",
+      aspsp: "Cadence aggregator",
       accountHolder,
-      accountId: checking.resourceId,
+      accountId: primaryAccountId,
       transactions,
       balanceSeries,
     };
   }
 }
 
-export const ais: AisProvider = new DemoBankAisProvider();
+export const ais: AisProvider = new AggregatingAisProvider();

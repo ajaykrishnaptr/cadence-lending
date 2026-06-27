@@ -15,12 +15,16 @@ export interface Transaction {
   description: string;
   counterparty?: string;
   direction: Direction;
+  /** Which ASPSP this line came from (set by the AIS aggregator). */
+  bankId?: string;
   /** Running balance after this line (Berlin Group balanceAfterTransaction). */
   balanceAfter?: number;
 }
 
 export interface Account {
   id: string;
+  /** Which ASPSP this account is held at. */
+  bankId: string;
   type: "checking" | "savings";
   name: string;
   /** Full IBAN as the ASPSP returns it; masked for display in the UI. */
@@ -94,6 +98,8 @@ export interface PersonaProfile {
   request: LoanRequest;
   /** Whether this persona is a hand-authored hard/ambiguous eval case. */
   hardCase?: boolean;
+  /** ASPSP ids the applicant banks with (aggregated by Cadence). */
+  banks: string[];
   blurb: string;
 }
 

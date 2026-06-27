@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { getBgBalances, personaForAccount } from "@/lib/demo-bank";
+import { bankExists, getBgBalances, personaForAccount } from "@/lib/demo-bank";
 import type { BgBalancesResponse } from "@/lib/psd2";
 
-/**
- * Demo Bank (mock ASPSP) — Berlin Group "Read Balance".
- *   GET /api/demo-bank/accounts/{accountId}/balances
- */
+/** Mock ASPSP — Berlin Group "Read Balance". */
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ accountId: string }> },
+  { params }: { params: Promise<{ bankId: string; accountId: string }> },
 ) {
-  const { accountId } = await params;
+  const { bankId, accountId } = await params;
   const persona = personaForAccount(accountId);
-  const result = persona ? getBgBalances(persona, accountId) : undefined;
+  const result = bankExists(bankId) && persona ? getBgBalances(persona, accountId) : undefined;
   if (!result) {
     return NextResponse.json(
       { tppMessages: [{ category: "ERROR", code: "RESOURCE_UNKNOWN" }] },

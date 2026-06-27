@@ -44,13 +44,29 @@ export interface AdverseSpec {
   gamblingMerchants?: string[];
 }
 
-export interface ProfileSpec extends PersonaProfile {
+export interface SecondBankAccountSpec {
+  type: "checking" | "savings";
+  name: string;
+  /** Savings: the shown balance. Checking: the opening balance. */
+  balance: number;
+  recurring?: RecurringSpec[];
+  spend?: SpendStream[];
+}
+
+export interface SecondBankSpec {
+  bankId: string;
+  accounts: SecondBankAccountSpec[];
+}
+
+export interface ProfileSpec extends Omit<PersonaProfile, "banks"> {
   openingBalance: number;
   savingsBalance: number;
   salary: SalarySpec;
   recurring: RecurringSpec[];
   spend: SpendStream[];
   adverse?: AdverseSpec;
+  /** A second ASPSP the applicant also banks with (multibanking). */
+  secondBank?: SecondBankSpec;
 }
 
 const GROCERS = ["Markthalle", "FrischMarkt", "TagesGut", "Korb & Co"];
@@ -91,6 +107,10 @@ export const PROFILES: ProfileSpec[] = [
       { merchants: TRANSIT, perMonth: 2, avg: 59, jitter: 0.2, category: "transport" },
       { merchants: EATING_OUT, perMonth: 3, avg: 28, jitter: 0.5, category: "discretionary" },
     ],
+    secondBank: {
+      bankId: "civic-bank",
+      accounts: [{ type: "savings", name: "Civic Sparen", balance: 6200 }],
+    },
   },
   {
     id: "tomas-neuer",
@@ -159,6 +179,20 @@ export const PROFILES: ProfileSpec[] = [
       { merchants: FUEL, perMonth: 3, avg: 61, jitter: 0.3, category: "transport" },
     ],
     adverse: { overdraftPerMonth: 2 },
+    secondBank: {
+      bankId: "civic-bank",
+      accounts: [
+        {
+          type: "checking",
+          name: "Civic Girokonto",
+          balance: -120,
+          recurring: [
+            { desc: "KreditPlus Rahmenkredit Rate", counterparty: "KreditPlus", amount: 150, day: 9, category: "other-credit" },
+          ],
+          spend: [{ merchants: GROCERS, perMonth: 3, avg: 41, jitter: 0.4, category: "groceries" }],
+        },
+      ],
+    },
   },
   {
     id: "jonas-frei",
@@ -192,6 +226,10 @@ export const PROFILES: ProfileSpec[] = [
       { merchants: SHOPPING, perMonth: 2, avg: 140, jitter: 0.6, category: "discretionary" },
       { merchants: FUEL, perMonth: 3, avg: 78, jitter: 0.25, category: "transport" },
     ],
+    secondBank: {
+      bankId: "civic-bank",
+      accounts: [{ type: "savings", name: "Civic Tagesgeld", balance: 38000 }],
+    },
   },
   {
     id: "sofia-lindqvist",
@@ -266,6 +304,16 @@ export function getProfile(id: string): ProfileSpec | undefined {
 /** Public persona metadata (no generation internals) for UI lists. */
 export function listPersonas(): PersonaProfile[] {
   return PROFILES.map(
-    ({ openingBalance: _o, savingsBalance: _s, salary: _sal, recurring: _r, spend: _sp, adverse: _a, ...meta }) => meta,
+    ({ openingBalance: _o, savingsBalance: _s, salary: _sal, recurring: _r, spend: _sp, adverse: _a, secondBank, ...meta }) => ({
+      ...meta,
+      banks: ["demo-bank", ...(secondBank ? [secondBank.bankId] : [])],
+    }),
   );
+}
+
+/** ASPSP ids a persona banks with. */
+export function banksForPersona(personaId: string): string[] {
+  const p = getProfile(personaId);
+  if (!p) return [];
+  return ["demo-bank", ...(p.secondBank ? [p.secondBank.bankId] : [])];
 }

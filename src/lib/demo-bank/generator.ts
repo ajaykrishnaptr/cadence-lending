@@ -242,6 +242,7 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
   const accounts: Account[] = [
     {
       id: checkingId,
+      bankId: "demo-bank",
       type: "checking",
       name: "Girokonto",
       iban: ibanFor("chk"),
@@ -250,6 +251,7 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
     },
     {
       id: savingsId,
+      bankId: "demo-bank",
       type: "savings",
       name: "Tagesgeld Sparen",
       iban: ibanFor("sav"),
@@ -257,6 +259,83 @@ export function generatePersonaData(profile: ProfileSpec): PersonaData {
       currency: "EUR",
     },
   ];
+
+  // --- second ASPSP (multibanking) ---
+  if (profile.secondBank) {
+    const bankId = profile.secondBank.bankId;
+    profile.secondBank.accounts.forEach((spec, ai) => {
+      const accId = `${profile.id}-${bankId}-${ai}`;
+      if (spec.type === "savings") {
+        accounts.push({
+          id: accId,
+          bankId,
+          type: "savings",
+          name: spec.name,
+          iban: ibanFor(`${bankId}-${ai}`),
+          balance: round2(spec.balance),
+          currency: "EUR",
+        });
+        return;
+      }
+      // checking: generate its own transactions (recurring + spend)
+      const acctPending: Pending[] = [];
+      let aseq = 0;
+      for (const mr of months) {
+        const dim = daysInMonth(mr.year, mr.month);
+        const cutoff = mr.latest ? LATEST_MONTH_CUTOFF_DAY : dim;
+        const clampDay = (d: number) => Math.min(d, dim);
+        for (const r of spec.recurring ?? []) {
+          const day = clampDay(r.day);
+          if (day > cutoff) continue;
+          acctPending.push({
+            id: `${accId}-${String(aseq++).padStart(3, "0")}`,
+            accountId: accId,
+            currency: "EUR",
+            direction: "debit",
+            bookingDate: iso(mr.year, mr.month, day),
+            amount: round2(-jit(r.amount, r.jitter ?? 0.01)),
+            description: r.desc,
+            counterparty: r.counterparty,
+            truth: truthFor(r.category, { isRecurring: true }),
+          });
+        }
+        for (const stream of spec.spend ?? []) {
+          for (let i = 0; i < stream.perMonth; i++) {
+            const day = clampDay(1 + Math.floor(range(0, dim)));
+            if (day > cutoff) continue;
+            const merchant = pick(stream.merchants);
+            acctPending.push({
+              id: `${accId}-${String(aseq++).padStart(3, "0")}`,
+              accountId: accId,
+              currency: "EUR",
+              direction: "debit",
+              bookingDate: iso(mr.year, mr.month, day),
+              amount: round2(-jit(stream.avg, stream.jitter)),
+              description: `${merchant} ${pick(["", "Kartenzahlung", "EC"])}`.trim(),
+              counterparty: merchant,
+              truth: truthFor(stream.category),
+            });
+          }
+        }
+      }
+      acctPending.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : a.bookingDate > b.bookingDate ? 1 : 0));
+      let arun = round2(spec.balance);
+      for (const t of acctPending) {
+        arun = round2(arun + t.amount);
+        transactions.push({ ...t, balance: arun });
+      }
+      accounts.push({
+        id: accId,
+        bankId,
+        type: "checking",
+        name: spec.name,
+        iban: ibanFor(`${bankId}-${ai}`),
+        balance: arun,
+        currency: "EUR",
+      });
+    });
+    transactions.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : a.bookingDate > b.bookingDate ? 1 : 0));
+  }
 
   return { accounts, transactions };
 }

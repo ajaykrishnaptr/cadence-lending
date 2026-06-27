@@ -98,7 +98,7 @@ function bgAmount(n: number): BgAmount {
 export function serializeAccount(
   acc: Account,
   ownerName: string,
-  basePath: string,
+  opts: { bic: string; basePath: string },
 ): BgAccount {
   return {
     resourceId: acc.id,
@@ -108,11 +108,11 @@ export function serializeAccount(
     product: acc.type === "checking" ? "Girokonto" : "Tagesgeldkonto",
     cashAccountType: CASH_TYPE[acc.type],
     status: "enabled",
-    bic: "DEMODEFFXXX",
+    bic: opts.bic,
     ownerName,
     _links: {
-      balances: { href: `${basePath}/accounts/${acc.id}/balances` },
-      transactions: { href: `${basePath}/accounts/${acc.id}/transactions` },
+      balances: { href: `${opts.basePath}/accounts/${acc.id}/balances` },
+      transactions: { href: `${opts.basePath}/accounts/${acc.id}/transactions` },
     },
   };
 }
@@ -153,12 +153,13 @@ export function serializeTransaction(t: SeededTransaction): BgTransaction {
 
 // ---- parse Berlin Group → internal (Cadence's AIS adapter) ----
 
-export function parseBgAccount(bg: BgAccount): Account {
+export function parseBgAccount(bg: BgAccount, bankId: string): Account {
   const type: Account["type"] =
     bg.cashAccountType === "SVGS" ? "savings" : "checking";
   const closing = bg.balances?.find((b) => b.balanceType === "closingBooked");
   return {
     id: bg.resourceId,
+    bankId,
     type,
     name: bg.name,
     iban: bg.iban,
@@ -170,6 +171,7 @@ export function parseBgAccount(bg: BgAccount): Account {
 export function parseBgTransaction(
   bg: BgTransaction,
   accountId: string,
+  bankId?: string,
 ): Transaction & { balanceAfter?: number } {
   const amount = Number(bg.transactionAmount.amount);
   const counterparty = bg.creditorName || bg.debtorName || undefined;
@@ -185,6 +187,7 @@ export function parseBgTransaction(
     description,
     counterparty,
     direction: amount >= 0 ? "credit" : "debit",
+    bankId,
     balanceAfter: bg.balanceAfterTransaction
       ? Number(bg.balanceAfterTransaction.amount)
       : undefined,

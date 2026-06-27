@@ -20,6 +20,7 @@ import { CONSUMER_LOAN, monthlyInstalment } from "@/lib/engine/config";
 import { formatEUR } from "@/lib/format";
 import { purposeLabel, PURPOSE_LABELS } from "@/lib/labels";
 import { submitApplication, loginAs } from "@/lib/actions";
+import { bankName } from "@/lib/demo-bank/banks";
 import { CadenceMark } from "@/components/cadence-logo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -111,6 +112,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
           scope={scope}
           setScope={setScope}
           expiry={expiry}
+          banks={persona.banks}
           onBack={() => setStep(1)}
           onGrant={() => setStep(3)}
         />
@@ -119,6 +121,7 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
       {step === 3 && (
         <ConnectStep
           persona={persona}
+          banks={persona.banks}
           state={connectState}
           setState={setConnectState}
           pending={pending}
@@ -240,10 +243,11 @@ function OfferStep(props: {
 }
 
 // ---- Step 2: Consent ----
-function ConsentStep({ scope, setScope, expiry, onBack, onGrant }: { scope: ConsentScope; setScope: (s: ConsentScope) => void; expiry: Date; onBack: () => void; onGrant: () => void }) {
+function ConsentStep({ scope, setScope, expiry, banks, onBack, onGrant }: { scope: ConsentScope; setScope: (s: ConsentScope) => void; expiry: Date; banks: string[]; onBack: () => void; onGrant: () => void }) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const expiryStr = `${expiry.getUTCDate()} ${months[expiry.getUTCMonth()]} ${expiry.getUTCFullYear()}`;
   const anyScope = Object.values(scope).some(Boolean);
+  const multi = banks.length > 1;
 
   return (
     <Card>
@@ -251,15 +255,25 @@ function ConsentStep({ scope, setScope, expiry, onBack, onGrant }: { scope: Cons
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><ShieldCheck className="h-5 w-5" /></span>
         <div>
           <h2 className="font-heading text-lg font-semibold">Account information consent</h2>
-          <p className="text-sm text-muted-foreground">Cadence is requesting read-only access to your Demo Bank accounts.</p>
+          <p className="text-sm text-muted-foreground">Cadence is requesting read-only access to your accounts at {banks.map(bankName).join(" and ")}.</p>
         </div>
       </div>
 
       <div className="mt-5 flex items-center justify-between rounded-xl border bg-muted/30 p-3 text-sm">
         <div className="flex items-center gap-2"><CadenceMark className="h-6 w-6" /> <span className="font-medium">Cadence</span></div>
         <ArrowRight className="h-4 w-4 text-muted-foreground" />
-        <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-md bg-foreground/80 text-background"><Building2 className="h-3.5 w-3.5" /></span> <span className="font-medium">Demo Bank</span></div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {banks.map((b) => (
+            <span key={b} className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 ring-1 ring-inset ring-border">
+              <span className="flex h-5 w-5 items-center justify-center rounded bg-foreground/80 text-background"><Building2 className="h-3 w-3" /></span>
+              <span className="font-medium">{bankName(b)}</span>
+            </span>
+          ))}
+        </div>
       </div>
+      {multi && (
+        <p className="mt-2 text-xs text-brand">Multibanking: Cadence aggregates across all {banks.length} of your banks for a complete affordability picture.</p>
+      )}
 
       <div className="mt-5 space-y-1">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Data you share</p>
@@ -297,16 +311,29 @@ function Info({ icon, title, body }: { icon: React.ReactNode; title: string; bod
 }
 
 // ---- Step 3: Connect (Demo Bank) ----
-function ConnectStep({ persona, state, setState, pending, onAuthorise, onBack }: { persona: PersonaProfile; state: "login" | "sca" | "pulling"; setState: (s: "login" | "sca" | "pulling") => void; pending: boolean; onAuthorise: () => void; onBack: () => void }) {
+function ConnectStep({ persona, banks, state, setState, pending, onAuthorise, onBack }: { persona: PersonaProfile; banks: string[]; state: "login" | "sca" | "pulling"; setState: (s: "login" | "sca" | "pulling") => void; pending: boolean; onAuthorise: () => void; onBack: () => void }) {
+  const primary = banks[0];
+  const multi = banks.length > 1;
   return (
     <Card className="border-foreground/15 bg-gradient-to-b from-foreground/[0.03] to-transparent">
       <div className="flex items-center gap-3 border-b pb-4">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground text-background"><Building2 className="h-5 w-5" /></span>
         <div>
-          <h2 className="font-heading text-lg font-semibold">Demo Bank — secure sign-in</h2>
+          <h2 className="font-heading text-lg font-semibold">{bankName(primary)} — secure sign-in</h2>
           <p className="text-xs text-muted-foreground">You have been redirected to your bank to authorise access. Cadence never sees your credentials.</p>
         </div>
       </div>
+      {multi && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-2.5 text-xs">
+          <span className="text-muted-foreground">Banks to connect:</span>
+          {banks.map((b, i) => (
+            <span key={b} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ring-1 ring-inset", state === "pulling" || i === 0 ? "bg-success-muted text-success-foreground ring-success/30" : "bg-card text-muted-foreground ring-border")}>
+              {(state === "pulling" || i === 0) && <Check className="h-3 w-3" />}
+              {bankName(b)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {state === "login" && (
         <div className="mt-5 space-y-4">
@@ -342,7 +369,7 @@ function ConnectStep({ persona, state, setState, pending, onAuthorise, onBack }:
         <div className="mt-8 flex flex-col items-center justify-center gap-3 py-8 text-center">
           <Loader2 className="h-8 w-8 animate-spin text-brand" />
           <p className="text-sm font-medium">Retrieving your account data…</p>
-          <p className="max-w-xs text-xs text-muted-foreground">Cadence is calling Demo Bank&apos;s Berlin Group AIS endpoints, then categorising ~6 months of transactions.</p>
+          <p className="max-w-xs text-xs text-muted-foreground">Cadence is calling {multi ? `all ${banks.length} banks'` : `${bankName(primary)}'s`} Berlin Group AIS endpoints, aggregating and categorising ~6 months of transactions.</p>
         </div>
       )}
     </Card>

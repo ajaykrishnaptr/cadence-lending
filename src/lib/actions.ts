@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ROLE_COOKIE } from "@/middleware";
 import { getSessionId } from "./session";
 import { getStore } from "./store";
-import { getProfile } from "./demo-bank";
+import { getProfile, banksForPersona, bankName } from "./demo-bank";
 import { getDecision, getCategorised } from "./cadence";
 import "./llm"; // side-effect: registers the live Gemini categoriser
 import { outcomeToStatus } from "./cadence/applications";
@@ -93,9 +93,10 @@ export async function submitApplication(input: SubmitInput) {
   });
 
   // 3. audit trail for the full flow
+  const banks = banksForPersona(input.personaId);
   const events: { type: string; message: string; actor: "applicant" | "system"; meta?: Record<string, unknown> }[] = [
     { type: "consent.granted", message: `Consent granted for account information access (180-day expiry, ${Object.values(scope).filter(Boolean).length}/4 scopes).`, actor: "applicant", meta: { consentId: consent.id, scope } },
-    { type: "data.pull", message: "Retrieved accounts and ~6 months of transactions via the AIS provider (Demo Bank · Berlin Group NextGenPSD2).", actor: "system", meta: { aspsp: "Demo Bank", standard: "Berlin Group NextGenPSD2 XS2A" } },
+    { type: "data.pull", message: `Aggregated accounts and ~6 months of transactions across ${banks.length} bank${banks.length > 1 ? "s" : ""} (${banks.map(bankName).join(", ")}) via the AIS provider (Berlin Group NextGenPSD2).`, actor: "system", meta: { banks, standard: "Berlin Group NextGenPSD2 XS2A" } },
     { type: "categorisation", message: `Categorised ${decision.transactions.length} transactions (${decision.categoriserSource} categoriser).`, actor: "system", meta: { source: decision.categoriserSource, count: decision.transactions.length } },
     { type: "decision.engine", message: `Affordability engine result: ${decision.outcomeLabel}.`, actor: "system", meta: { outcome: decision.outcome, recommendedLimit: decision.recommendedLimit } },
     { type: "application.submitted", message: `Application submitted from a comparison-portal lead — €${request.amount.toLocaleString("de-DE")} over ${request.termMonths} months.`, actor: "applicant" },
