@@ -28,14 +28,21 @@ export default async function ApplicationDetailPage({
     getConsentViews(sid, resolved),
   ]);
 
-  const latest = resolved.isSeed ? undefined : await getStore().latestDecision(sid, resolved.appId);
+  const [latest, auditRows] = await Promise.all([
+    getStore().latestDecision(sid, resolved.appId),
+    getStore().listAudit(sid, resolved.appId),
+  ]);
   const officerDecision = latest && latest.decidedBy === "officer" ? latest : null;
-
-  const auditRows = resolved.isSeed ? [] : await getStore().listAudit(sid, resolved.appId);
   const humanReviewRequested = auditRows.some((a) => a.type === "art22.human_review_requested");
   const checks = originationChecks(resolved.personaId, decision);
 
-  const status = resolved.isSeed ? outcomeToStatus(decision.outcome) : resolved.status;
+  // An officer override (incl. on a seeded app) wins; otherwise the engine
+  // outcome for seed apps, or the stored status for session apps.
+  const status = officerDecision
+    ? outcomeToStatus(officerDecision.outcome)
+    : resolved.isSeed
+      ? outcomeToStatus(decision.outcome)
+      : resolved.status;
   const initialRationale = buildRationale(decision, profile.name);
 
   return (

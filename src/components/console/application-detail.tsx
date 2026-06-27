@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
   ShieldCheck,
   ShieldOff,
   Sparkles,
@@ -71,6 +72,7 @@ export function ApplicationDetail(props: DetailProps) {
   const { meta, decision } = props;
   const router = useRouter();
   const [pending, startRevoke] = useTransition();
+  const [tab, setTab] = useState("overview");
   const [withdrawn, setWithdrawn] = useState<Set<string>>(
     () => new Set(props.consents.filter((c) => c.status === "withdrawn").map((c) => c.bankId)),
   );
@@ -95,7 +97,8 @@ export function ApplicationDetail(props: DetailProps) {
       <div className="space-y-6">
         <Header meta={meta} consents={props.consents} withdrawn={withdrawn} />
         <SummaryBand decision={decision} meta={meta} />
-        <Tabs defaultValue="overview">
+        <DecisionCta decision={decision} officerDecision={props.officerDecision} humanReviewRequested={props.humanReviewRequested} onRecord={() => setTab("decision")} />
+        <Tabs value={tab} onValueChange={(v) => setTab(v as string)}>
           <TabsList className="flex-wrap">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="transactions">Transactions</TabsTrigger>
@@ -214,6 +217,41 @@ function SummaryBand({ decision, meta }: { decision: DetailProps["decision"]; me
         </div>
         <div className="mt-1 text-xs text-muted-foreground">{purposeLabel(meta.status === "pending" ? decision.request.purpose : decision.request.purpose)} · submitted {formatDate(meta.submittedAt.slice(0, 10))}</div>
       </div>
+    </div>
+  );
+}
+
+// ---------------- Awaiting-decision CTA ----------------
+function DecisionCta({ decision, officerDecision, humanReviewRequested, onRecord }: {
+  decision: DetailProps["decision"];
+  officerDecision: DecisionRec | null;
+  humanReviewRequested: boolean;
+  onRecord: () => void;
+}) {
+  if (officerDecision) {
+    return (
+      <div className="flex flex-col gap-3 rounded-xl border border-success/30 bg-success-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-2.5">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+          <div>
+            <p className="text-sm font-medium">Officer decision recorded — {officerDecision.outcomeLabel}</p>
+            <p className="text-xs text-muted-foreground">{formatDateTime(officerDecision.createdAt)}{officerDecision.note ? ` · ${officerDecision.note}` : ""}</p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={onRecord}>Review / change</Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-warm/40 bg-warm-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-2.5">
+        <Gavel className="mt-0.5 h-5 w-5 shrink-0 text-warm" />
+        <div>
+          <p className="text-sm font-medium">Awaiting officer decision{humanReviewRequested && <span className="ml-2 rounded-full bg-warm px-1.5 py-0.5 text-[10px] font-medium text-warm-foreground">human review requested</span>}</p>
+          <p className="text-xs text-muted-foreground">The engine recommends <span className="font-medium text-foreground">{decision.outcomeLabel}</span>. Review the explainable assessment and confirm or override.</p>
+        </div>
+      </div>
+      <Button size="sm" onClick={onRecord}>Record decision <ArrowRight className="h-4 w-4" /></Button>
     </div>
   );
 }
@@ -785,30 +823,29 @@ function DecisionTab(props: DetailProps) {
       <div className="space-y-5">
         <div className="rounded-xl border bg-card p-5">
           <h3 className="font-heading text-sm font-semibold">Officer decision</h3>
-          {meta.isSeed ? (
-            <p className="mt-2 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
-              This is a seeded portfolio application and is read-only. Run your own application from the applicant journey to record an override here.
-            </p>
-          ) : (
-            <div className="mt-3 space-y-3">
-              <div className="grid grid-cols-3 gap-2">
-                {(["approve", "refer", "decline"] as DecisionOutcome[]).map((o) => (
-                  <button key={o} onClick={() => setOutcome(o)} className={cn("rounded-lg border px-2 py-2 text-xs font-medium capitalize transition-all", outcome === o ? "border-brand bg-brand-muted/60 text-brand" : "hover:border-brand/30")}>
-                    {o}
-                  </button>
-                ))}
-              </div>
-              <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add an override note (optional)…" rows={3} className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/30" />
-              <Button className="w-full" onClick={record} disabled={recPending}>
-                {recPending ? "Recording…" : "Record decision"}
-              </Button>
-              {officerDecision && (
-                <p className="text-[11px] text-muted-foreground">
-                  Last officer action: {officerDecision.outcomeLabel} · {formatDateTime(officerDecision.createdAt)}
-                </p>
-              )}
+          <div className="mt-3 space-y-3">
+            {meta.isSeed && (
+              <p className="rounded-lg bg-muted/50 p-2.5 text-[11px] text-muted-foreground">
+                Seeded portfolio application — your decision is recorded for this session only and does not change the shared demo data.
+              </p>
+            )}
+            <div className="grid grid-cols-3 gap-2">
+              {(["approve", "refer", "decline"] as DecisionOutcome[]).map((o) => (
+                <button key={o} onClick={() => setOutcome(o)} className={cn("rounded-lg border px-2 py-2 text-xs font-medium capitalize transition-all", outcome === o ? "border-brand bg-brand-muted/60 text-brand" : "hover:border-brand/30")}>
+                  {o}
+                </button>
+              ))}
             </div>
-          )}
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add an override note (optional)…" rows={3} className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/30" />
+            <Button className="w-full" onClick={record} disabled={recPending}>
+              {recPending ? "Recording…" : "Record decision"}
+            </Button>
+            {officerDecision && (
+              <p className="text-[11px] text-muted-foreground">
+                Last officer action: {officerDecision.outcomeLabel} · {formatDateTime(officerDecision.createdAt)}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

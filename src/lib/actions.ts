@@ -139,10 +139,15 @@ export async function recordOfficerDecision(input: {
 }) {
   const sid = await getSessionId();
   const store = getStore();
-  const app = await store.getApplicationById(sid, input.applicationId);
-  if (!app) return { ok: false as const, error: "Application not found in this session. Seeded portfolio applications are read-only." };
+  // Seeded portfolio apps have no applications row; their officer decision is
+  // recorded as a session-scoped overlay (decision + audit keyed by sessionId +
+  // the seed app id), so the global seed data is never mutated.
+  const isSeed = input.applicationId.startsWith("seed-");
+  const app = isSeed ? null : await store.getApplicationById(sid, input.applicationId);
+  if (!isSeed && !app) return { ok: false as const, error: "Application not found in this session." };
 
-  await store.updateApplicationStatus(sid, input.applicationId, outcomeToStatus(input.outcome));
+  await store.ensureSession(sid);
+  if (app) await store.updateApplicationStatus(sid, input.applicationId, outcomeToStatus(input.outcome));
   await store.recordDecision({
     sessionId: sid,
     applicationId: input.applicationId,
