@@ -3,13 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 export const SESSION_COOKIE = "cadence_sid";
 export const ROLE_COOKIE = "cadence_role";
 
+const COOKIE_OPTS = { sameSite: "lax" as const, path: "/", maxAge: 60 * 60 * 24 * 30 };
+
 /**
  * Two jobs:
  *  1. Guarantee every visitor carries a stable sessionId (scopes all writes;
  *     seeded Demo Bank data is global read-only and never keyed by it).
- *  2. Mock route guards: the console is officer-only, the applicant journey is
- *     applicant-only. Auth is decorative — credentials are shown on the login
- *     screen — but the guards make the role switch feel real.
+ *  2. Decorative role handling. The console is the officer area and the
+ *     applicant journey is the applicant area; on first visit to either, the
+ *     matching role is granted in place so the golden path never dead-ends at a
+ *     sign-in wall. The login screen stays available from the header for the
+ *     credentials demo and for explicitly switching roles.
  */
 export function middleware(req: NextRequest) {
   const res = NextResponse.next();
@@ -17,35 +21,18 @@ export function middleware(req: NextRequest) {
   let sid = req.cookies.get(SESSION_COOKIE)?.value;
   if (!sid) {
     sid = crypto.randomUUID();
-    res.cookies.set(SESSION_COOKIE, sid, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
+    res.cookies.set(SESSION_COOKIE, sid, { httpOnly: true, ...COOKIE_OPTS });
   }
 
   const role = req.cookies.get(ROLE_COOKIE)?.value;
   const { pathname } = req.nextUrl;
 
-  const needsOfficer = pathname.startsWith("/console");
-  const needsApplicant = pathname.startsWith("/apply");
-
-  if (needsOfficer && role !== "officer") {
-    return redirectToLogin(req, "officer");
-  }
-  if (needsApplicant && role !== "applicant") {
-    return redirectToLogin(req, "applicant");
+  if (pathname.startsWith("/console") && role !== "officer") {
+    res.cookies.set(ROLE_COOKIE, "officer", COOKIE_OPTS);
+  } else if (pathname.startsWith("/apply") && role !== "applicant") {
+    res.cookies.set(ROLE_COOKIE, "applicant", COOKIE_OPTS);
   }
   return res;
-}
-
-function redirectToLogin(req: NextRequest, want: string) {
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.searchParams.set("next", req.nextUrl.pathname);
-  url.searchParams.set("role", want);
-  return NextResponse.redirect(url);
 }
 
 export const config = {
