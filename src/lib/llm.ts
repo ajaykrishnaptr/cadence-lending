@@ -209,10 +209,16 @@ export async function categoriseWithGemini(
  */
 export async function categoriseWithGeminiCached(
   txns: Transaction[],
+  opts?: { force?: boolean },
 ): Promise<LiveCategoriseOutput> {
   const cache = getCatCache();
   const keys = txns.map(cacheKey);
-  const cached = await cache.getMany(keys);
+  // `force` bypasses the cache READ so the model genuinely runs (the eval uses
+  // this so a viewer always sees a real live call), while fresh labels are still
+  // written back below.
+  const cached = opts?.force
+    ? new Map<string, CategorisedTransaction["categorisation"]>()
+    : await cache.getMany(keys);
 
   const out: CategorisedTransaction[] = new Array(txns.length);
   const misses: { t: Transaction; i: number }[] = [];
@@ -282,7 +288,7 @@ export interface LiveEvalResult {
   model?: string;
 }
 
-export async function evaluateWithGemini(): Promise<LiveEvalResult> {
+export async function evaluateWithGemini(opts?: { force?: boolean }): Promise<LiveEvalResult> {
   const { getEvalCases, scoreCases, baselineEval } = await import("./eval");
   if (!llmConfigured()) {
     return { result: baselineEval(), source: "rules", fellBack: true };
@@ -290,7 +296,7 @@ export async function evaluateWithGemini(): Promise<LiveEvalResult> {
   const all = getEvalCases();
   const sample = sampleEvalCases(all, LIVE_EVAL_SAMPLE);
   try {
-    const { transactions, cache, model } = await categoriseWithGeminiCached(sample.map((c) => c.transaction));
+    const { transactions, cache, model } = await categoriseWithGeminiCached(sample.map((c) => c.transaction), opts);
     const result = scoreCases(sample, transactions.map((t) => t.categorisation));
     return {
       result,

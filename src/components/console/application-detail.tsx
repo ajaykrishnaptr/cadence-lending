@@ -432,7 +432,7 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
           const desc = c
             ? c.misses === 0
               ? `All ${res.transactions.length} lines served from the ${c.store} cache — zero model calls.`
-              : `${res.transactions.length} relabelled · ${c.hits} from cache, ${c.misses} live model call${c.misses > 1 ? "s" : ""}${via}.`
+              : `${res.transactions.length} relabelled · ${c.misses} scored live by the model${c.hits ? `, ${c.hits} from cache` : ""}${via}.`
             : `${res.transactions.length} transactions relabelled${via}.`;
           toast.success(`Re-categorised${res.model ? ` with ${res.model}` : " live"}`, { description: desc });
         }

@@ -48,7 +48,11 @@ export function EvalReport({
       } else {
         const c = res.cache;
         const who = res.model ?? "The live model";
-        const cacheNote = c ? (c.misses === 0 ? " (all from cache — no model calls)" : ` (${c.hits} cached, ${c.misses} live)`) : "";
+        const cacheNote = c
+          ? c.misses > 0
+            ? `, scored live by the model${c.hits ? ` (${c.hits} reused from cache)` : ""}`
+            : " — served from cache (no new model call this run)"
+          : "";
         const desc = res.sampled
           ? `${who} scored a ${res.view.total}-transaction sample of ${res.totalAvailable} labelled lines${cacheNote}.`
           : `${who} categorised ${res.view.total} labelled transactions${cacheNote}.`;

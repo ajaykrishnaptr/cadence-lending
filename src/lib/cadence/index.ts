@@ -41,6 +41,7 @@ export async function getCategorised(
   personaId: string,
   source: CategoriserSource = "seed",
   banks?: string[],
+  opts?: { force?: boolean },
 ): Promise<CategoriseResult> {
   const key = `${personaId}:${source}:${banksKey(banks)}`;
   if (source !== "gemini") {
@@ -48,7 +49,7 @@ export async function getCategorised(
     if (hit) return hit;
   }
   const tx = await ais.getTransactions(personaId, banks);
-  const result = await categorise(tx.transactions, source);
+  const result = await categorise(tx.transactions, source, opts);
   if (source !== "gemini") categoriseCache.set(key, result);
   return result;
 }
