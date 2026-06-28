@@ -3,7 +3,7 @@
  * run the decision engine, and confirm outcomes match the intended demo design.
  *   npx tsx scripts/verify-engine.ts
  */
-import { PROFILES, getPersonaData, bureauInput } from "../src/lib/demo-bank";
+import { PROFILES, getPersonaData, bureauInput, banksForPersona, queryCreditRegistry, bankName } from "../src/lib/demo-bank";
 import { categoriseByRules } from "../src/lib/categoriser/rules";
 import { runDecision } from "../src/lib/engine";
 import { CONSUMER_LOAN } from "../src/lib/engine/config";
@@ -81,4 +81,88 @@ console.log(`  With bureau        -> ${brunoWithBureau.outcomeLabel.padEnd(22)} 
 const bureauFlips = brunoNoBureau.outcome === "approve" && brunoWithBureau.outcome === "decline";
 console.log(bureauFlips ? "  ✓ the bureau hard negative flips approve -> decline" : "  ✗ expected approve -> decline");
 
-if (pass !== PROFILES.length || !flips || !bureauFlips) process.exit(1);
+// Data-coverage rule (R7): a bank the applicant holds but did not connect can
+// hide obligations, so an incomplete picture is referred rather than auto-
+// approved. Coverage is computed exactly as the live app does (cadence/index).
+function coverageFor(personaId: string, connected: string[]) {
+  const known = banksForPersona(personaId);
+  const conn = connected.filter((b) => known.includes(b));
+  const missing = known.filter((b) => !conn.includes(b));
+  const disc = queryCreditRegistry(personaId);
+  return {
+    connectedCount: conn.length,
+    knownCount: known.length,
+    missingBankNames: missing.map(bankName),
+    missingCreditCount: disc.filter((d) => d.isCredit && missing.includes(d.bankId)).length,
+  };
+}
+const r7Of = (d: ReturnType<typeof runDecision>) => d.rules.find((r) => r.id === "coverage")?.status;
+const txnsExcluding = (personaId: string, bankId: string | undefined) =>
+  catOf(getPersonaData(personaId)!.transactions.filter((t) => !bankId || !t.accountId.includes(bankId)));
+
+let covPass = 0;
+let covTotal = 0;
+function covCheck(label: string, cond: boolean, detail: string) {
+  covTotal++;
+  if (cond) covPass++;
+  console.log(`  ${cond ? "✓" : "✗"} ${label} ${detail}`);
+}
+
+console.log("\nData-coverage rule (R7):");
+
+// Lena on one bank: affordability alone would approve, but coverage refers.
+const lenaSecond = banksForPersona("lena-brandt")[1];
+const lenaDemoCov = runDecision(txnsExcluding("lena-brandt", lenaSecond), lenaP.request, CONSUMER_LOAN, lenaP.householdSize, bureauInput("lena-brandt"), coverageFor("lena-brandt", ["demo-bank"]));
+covCheck("Lena one bank  -> refer + R7 refer", lenaDemoCov.outcome === "refer" && r7Of(lenaDemoCov) === "refer",
+  `(${lenaDemoCov.outcomeLabel}, ${lenaDemoCov.dataCoverage?.connectedCount}/${lenaDemoCov.dataCoverage?.knownCount}, ${lenaDemoCov.dataCoverage?.percent}%)`);
+
+// Lena on both banks: coverage complete, R7 passes, still refers on hidden debt.
+const lenaBothCov = runDecision(catOf(lenaData.transactions), lenaP.request, CONSUMER_LOAN, lenaP.householdSize, bureauInput("lena-brandt"), coverageFor("lena-brandt", banksForPersona("lena-brandt")));
+covCheck("Lena both banks -> refer + R7 pass + complete", lenaBothCov.outcome === "refer" && r7Of(lenaBothCov) === "pass" && lenaBothCov.dataCoverage?.complete === true,
+  `(${lenaBothCov.outcomeLabel})`);
+
+// Clara is a clean approve on full coverage; one bank must refer via R7 — this
+// is the false-approve a partial connection would otherwise produce.
+const claraP = PROFILES.find((p) => p.id === "clara-bauer")!;
+const claraSecond = banksForPersona("clara-bauer")[1];
+const claraDemoCov = runDecision(txnsExcluding("clara-bauer", claraSecond), claraP.request, CONSUMER_LOAN, claraP.householdSize, bureauInput("clara-bauer"), coverageFor("clara-bauer", ["demo-bank"]));
+covCheck("Clara one bank -> refer (false-approve guard)", claraDemoCov.outcome === "refer" && r7Of(claraDemoCov) === "refer",
+  `(${claraDemoCov.outcomeLabel}, ${claraDemoCov.dataCoverage?.connectedCount}/${claraDemoCov.dataCoverage?.knownCount})`);
+const claraFullCov = runDecision(catOf(getPersonaData("clara-bauer")!.transactions), claraP.request, CONSUMER_LOAN, claraP.householdSize, bureauInput("clara-bauer"), coverageFor("clara-bauer", banksForPersona("clara-bauer")));
+covCheck("Clara full      -> approve + R7 pass", claraFullCov.outcome === "approve" && r7Of(claraFullCov) === "pass",
+  `(${claraFullCov.outcomeLabel})`);
+
+console.log(`\n${covPass}/${covTotal} data-coverage checks pass.`);
+
+// Consent-scope rule (R8): a withheld required scope (account list, balances or
+// transaction history) refers; standing orders stay optional. Erik is a clean
+// single-bank approve, so the only thing that flips him here is the scope rule.
+const r8Of = (d: ReturnType<typeof runDecision>) => d.rules.find((r) => r.id === "scope")?.status;
+const FULL_SCOPE = { accounts: true, balances: true, transactions: true, standingOrders: true };
+const erikP = PROFILES.find((p) => p.id === "erik-hofer")!;
+const erikCats = catOf(getPersonaData("erik-hofer")!.transactions);
+const erikCov = coverageFor("erik-hofer", banksForPersona("erik-hofer"));
+const runErik = (scope: typeof FULL_SCOPE) =>
+  runDecision(erikCats, erikP.request, CONSUMER_LOAN, erikP.householdSize, bureauInput("erik-hofer"), erikCov, scope);
+
+let scopePass = 0;
+let scopeTotal = 0;
+function scopeCheck(label: string, cond: boolean, detail: string) {
+  scopeTotal++;
+  if (cond) scopePass++;
+  console.log(`  ${cond ? "✓" : "✗"} ${label} ${detail}`);
+}
+
+console.log("\nConsent-scope rule (R8):");
+const sFull = runErik(FULL_SCOPE);
+scopeCheck("Erik full scope         -> approve + R8 pass", sFull.outcome === "approve" && r8Of(sFull) === "pass", `(${sFull.outcomeLabel})`);
+const sNoTx = runErik({ ...FULL_SCOPE, transactions: false });
+scopeCheck("Erik no transactions    -> refer + R8 refer", sNoTx.outcome === "refer" && r8Of(sNoTx) === "refer", `(${sNoTx.outcomeLabel})`);
+const sNoBal = runErik({ ...FULL_SCOPE, balances: false });
+scopeCheck("Erik no balances        -> refer + R8 refer", sNoBal.outcome === "refer" && r8Of(sNoBal) === "refer", `(${sNoBal.outcomeLabel})`);
+const sNoSo = runErik({ ...FULL_SCOPE, standingOrders: false });
+scopeCheck("Erik no standing orders -> approve (optional)", sNoSo.outcome === "approve" && r8Of(sNoSo) === "pass", `(${sNoSo.outcomeLabel})`);
+
+console.log(`\n${scopePass}/${scopeTotal} consent-scope checks pass.`);
+
+if (pass !== PROFILES.length || !flips || !bureauFlips || covPass !== covTotal || scopePass !== scopeTotal) process.exit(1);
