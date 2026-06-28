@@ -627,7 +627,10 @@ function AffordabilityTab({ decision }: { decision: DetailProps["decision"] }) {
         <h3 className="font-heading text-sm font-semibold">Decision rules</h3>
         <p className="mt-1 text-xs text-muted-foreground">Every rule shows its inputs and a pass / refer / fail outcome. The decision is the deterministic combination of these — no model in the loop.</p>
         <div className="mt-4 space-y-3">
-          {decision.rules.map((r) => (
+          {/* The consent-scope rule (R8) is a safety net: it only refers if a
+              required data scope was withheld. With full consent mandatory in the
+              flow it always passes, so hide it unless it has something to flag. */}
+          {decision.rules.filter((r) => !(r.id === "scope" && r.status === "pass")).map((r) => (
             <div key={r.id} className="rounded-lg border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
