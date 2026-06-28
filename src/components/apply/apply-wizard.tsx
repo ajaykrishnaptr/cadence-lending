@@ -32,7 +32,6 @@ import { submitApplication, loginAs, suggestBanksAction, queryRegistryAction, re
 import { CadenceMark } from "@/components/cadence-logo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +53,10 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
   const [amount, setAmount] = useState(persona.request.amount);
   const [term, setTerm] = useState(persona.request.termMonths);
   const [purpose, setPurpose] = useState<LoanPurpose>(persona.request.purpose);
-  const [scope, setScope] = useState<ConsentScope>({ accounts: true, balances: true, transactions: true, standingOrders: true });
+  // Cadence requests the full account-information scope as a single bundle —
+  // an instant affordability decision needs all of it, so consent is all-or-
+  // nothing (no partial-scope toggles). The scopes are shown for transparency.
+  const [scope] = useState<ConsentScope>({ accounts: true, balances: true, transactions: true, standingOrders: true });
   const [connected, setConnected] = useState<string[]>([]);
   const [disclosures, setDisclosures] = useState<RegistryDisclosure[]>([]);
   const [discovered, setDiscovered] = useState<string[]>([]);
@@ -145,7 +147,6 @@ export function ApplyWizard({ personas }: { personas: PersonaProfile[] }) {
       {step === 4 && (
         <ConsentStep
           scope={scope}
-          setScope={setScope}
           expiry={expiry}
           banks={connected}
           pending={pending}
@@ -596,11 +597,11 @@ function DiscoverStep({ persona, disclosures, setDisclosures, setDiscovered, onB
 }
 
 // ---- Step 3: Consent ----
-function ConsentStep({ scope, setScope, expiry, banks, pending, onBack, onGrant }: { scope: ConsentScope; setScope: (s: ConsentScope) => void; expiry: Date; banks: string[]; pending: boolean; onBack: () => void; onGrant: () => void }) {
+function ConsentStep({ scope, expiry, banks, pending, onBack, onGrant }: { scope: ConsentScope; expiry: Date; banks: string[]; pending: boolean; onBack: () => void; onGrant: () => void }) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const expiryStr = `${expiry.getUTCDate()} ${months[expiry.getUTCMonth()]} ${expiry.getUTCFullYear()}`;
-  const anyScope = Object.values(scope).some(Boolean);
   const multi = banks.length > 1;
+  void scope;
 
   return (
     <Card>
@@ -629,13 +630,17 @@ function ConsentStep({ scope, setScope, expiry, banks, pending, onBack, onGrant 
       )}
 
       <div className="mt-5 space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Data you share</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Data you share</p>
+          <span className="text-[11px] text-muted-foreground">Read-only · required</span>
+        </div>
         {(Object.keys(SCOPE_LABELS) as (keyof ConsentScope)[]).map((k) => (
           <div key={k} className="flex items-center justify-between border-b py-2.5 last:border-0">
             <span className="text-sm">{SCOPE_LABELS[k]}</span>
-            <Switch checked={scope[k]} onCheckedChange={(v) => setScope({ ...scope, [k]: v })} />
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-foreground"><Check className="h-3.5 w-3.5 text-success" /> Included</span>
           </div>
         ))}
+        <p className="pt-2 text-[11px] text-muted-foreground">All four are read-only and requested together as a single account-information consent per bank — an instant affordability decision needs the full picture, so access is all-or-nothing.</p>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -643,12 +648,12 @@ function ConsentStep({ scope, setScope, expiry, banks, pending, onBack, onGrant 
         <Info icon={<Lock className="h-4 w-4" />} title="Purpose" body="A one-off creditworthiness assessment for this loan application. Read-only — no payments can be made." />
       </div>
 
-      <p className="mt-4 text-xs text-muted-foreground">In this demo, consent is recorded for realism. It does not truly gate the underlying synthetic data, and withdrawing a bank flips that bank to a “data hidden” state.</p>
+      <p className="mt-4 text-xs text-muted-foreground">In this demo, consent is recorded for realism. Withdrawing a bank in the console flips that bank to a “data hidden” state.</p>
 
       <div className="mt-5 flex flex-col gap-2 sm:flex-row">
         <Button variant="outline" className="sm:w-32" onClick={onBack} disabled={pending}><ArrowLeft className="h-4 w-4" /> Back</Button>
         <Button variant="ghost" className="sm:flex-1" disabled={pending} onClick={() => toast.message("Consent declined", { description: "Without account access, no data-driven decision can be made." })}>Decline</Button>
-        <Button className="sm:flex-1" disabled={!anyScope || pending} onClick={onGrant}>
+        <Button className="sm:flex-1" disabled={pending} onClick={onGrant}>
           {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Granting & retrieving…</> : <>Grant access &amp; submit <ShieldCheck className="h-4 w-4" /></>}
         </Button>
       </div>
