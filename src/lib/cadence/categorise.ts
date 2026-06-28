@@ -37,6 +37,7 @@ export interface LiveCategoriseOutput {
 
 export type LiveCategoriser = (
   txns: Transaction[],
+  opts?: { force?: boolean },
 ) => Promise<LiveCategoriseOutput>;
 
 let liveCategoriser: LiveCategoriser | null = null;
@@ -52,13 +53,14 @@ export function categoriseWithRules(txns: Transaction[], source: CategoriserSour
 export async function categorise(
   txns: Transaction[],
   source: CategoriserSource,
+  opts?: { force?: boolean },
 ): Promise<CategoriseResult> {
   if (source === "gemini") {
     if (!liveCategoriser) {
       return { transactions: categoriseWithRules(txns, "rules"), source: "rules", fellBack: true, error: "Live categoriser not configured" };
     }
     try {
-      const out = await liveCategoriser(txns);
+      const out = await liveCategoriser(txns, opts);
       return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model };
     } catch (err) {
       return {

@@ -233,9 +233,13 @@ export async function queryRegistryAction(input: { personaId: string }) {
 }
 
 // ---- live re-categorisation (Gemini, with rules fallback) ----
-export async function recategoriseAction(input: { personaId: string }) {
+// Force a real model call by default (bypass the cache read) so the
+// "Re-categorise (live model)" button always exercises the model — a cached
+// run that made zero calls reads to a viewer as "no AI here". Same rationale as
+// the live eval.
+export async function recategoriseAction(input: { personaId: string; force?: boolean }) {
   const sid = await getSessionId();
-  const result = await getCategorised(input.personaId, "gemini");
+  const result = await getCategorised(input.personaId, "gemini", undefined, { force: input.force ?? true });
   const cache = result.cache;
   const modelNote = result.model ? ` via ${result.model}` : "";
   const cacheNote = cache ? ` (${cache.hits} from cache, ${cache.misses} live model calls${modelNote}; ${cache.store} cache)` : "";
@@ -275,10 +279,13 @@ export async function regenerateRationaleAction(input: {
 }
 
 // ---- live model evaluation (Gemini over a labelled sample) ----
-export async function runLiveEvalAction() {
+// Defaults to a genuine live run (force = bypass the cache read) so the button
+// labelled "Run evaluation (live model)" always makes a real model call — a
+// 100%-cache-hit run that made zero calls reads to a viewer as "no AI here".
+export async function runLiveEvalAction(input?: { force?: boolean }) {
   const { evaluateWithGemini } = await import("./llm");
   const { toEvalView } = await import("./eval");
-  const r = await evaluateWithGemini();
+  const r = await evaluateWithGemini({ force: input?.force ?? true });
   return {
     ok: true as const,
     source: r.source,
