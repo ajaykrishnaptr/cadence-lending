@@ -2,6 +2,7 @@ import type { Category } from "../categories";
 import { categoryLabel } from "../categories";
 import type {
   CategorisedTransaction,
+  ConsentScope,
   DecisionOutcome,
   LoanRequest,
 } from "../types";
@@ -193,6 +194,7 @@ export function runDecision(
   householdSize: number,
   bureau?: BureauInput,
   coverage?: CoverageInput,
+  scope?: ConsentScope,
 ): DecisionPackage {
   const income = analyseIncome(txns);
   const obligations = analyseObligations(txns);
@@ -428,6 +430,38 @@ export function runDecision(
         { label: "Known banks", value: `${coverage.knownCount}` },
         { label: "Not connected", value: coverage.missingBankNames.length ? coverage.missingBankNames.join(", ") : "none" },
         { label: "Disclosed credit at missing banks", value: `${coverage.missingCreditCount}` },
+      ],
+      txnIds: [],
+    });
+  }
+
+  // R8 — consent scope sufficiency. An automated affordability decision rests on
+  // the consented data: the account list, balances, and above all the transaction
+  // history that income, costs and obligations are read from. If the applicant
+  // withheld a required scope the picture is incomplete, so refer to a human
+  // rather than auto-decide on partial data. Only added when the caller supplies
+  // the granted scope.
+  if (scope) {
+    const required: { key: keyof ConsentScope; label: string }[] = [
+      { key: "accounts", label: "Account list" },
+      { key: "balances", label: "Balances" },
+      { key: "transactions", label: "Transaction history" },
+    ];
+    const missing = required.filter((r) => !scope[r.key]);
+    const r8: RuleStatus = missing.length ? "refer" : "pass";
+    rules.push({
+      id: "scope",
+      label: "Consent scope",
+      description:
+        "An automated affordability decision needs the consented data it relies on — the account list, balances and transaction history. A withheld scope leaves an incomplete picture, so it is referred to a human.",
+      status: r8,
+      valueLabel: missing.length ? `${missing.map((m) => m.label).join(", ")} withheld` : "All required scopes granted",
+      thresholdLabel: "accounts · balances · transactions",
+      inputs: [
+        { label: "Transaction history", value: scope.transactions ? "granted" : "withheld" },
+        { label: "Balances", value: scope.balances ? "granted" : "withheld" },
+        { label: "Account list", value: scope.accounts ? "granted" : "withheld" },
+        { label: "Standing orders", value: scope.standingOrders ? "granted" : "withheld" },
       ],
       txnIds: [],
     });
