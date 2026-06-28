@@ -134,4 +134,35 @@ covCheck("Clara full      -> approve + R7 pass", claraFullCov.outcome === "appro
 
 console.log(`\n${covPass}/${covTotal} data-coverage checks pass.`);
 
-if (pass !== PROFILES.length || !flips || !bureauFlips || covPass !== covTotal) process.exit(1);
+// Consent-scope rule (R8): a withheld required scope (account list, balances or
+// transaction history) refers; standing orders stay optional. Erik is a clean
+// single-bank approve, so the only thing that flips him here is the scope rule.
+const r8Of = (d: ReturnType<typeof runDecision>) => d.rules.find((r) => r.id === "scope")?.status;
+const FULL_SCOPE = { accounts: true, balances: true, transactions: true, standingOrders: true };
+const erikP = PROFILES.find((p) => p.id === "erik-hofer")!;
+const erikCats = catOf(getPersonaData("erik-hofer")!.transactions);
+const erikCov = coverageFor("erik-hofer", banksForPersona("erik-hofer"));
+const runErik = (scope: typeof FULL_SCOPE) =>
+  runDecision(erikCats, erikP.request, CONSUMER_LOAN, erikP.householdSize, bureauInput("erik-hofer"), erikCov, scope);
+
+let scopePass = 0;
+let scopeTotal = 0;
+function scopeCheck(label: string, cond: boolean, detail: string) {
+  scopeTotal++;
+  if (cond) scopePass++;
+  console.log(`  ${cond ? "✓" : "✗"} ${label} ${detail}`);
+}
+
+console.log("\nConsent-scope rule (R8):");
+const sFull = runErik(FULL_SCOPE);
+scopeCheck("Erik full scope         -> approve + R8 pass", sFull.outcome === "approve" && r8Of(sFull) === "pass", `(${sFull.outcomeLabel})`);
+const sNoTx = runErik({ ...FULL_SCOPE, transactions: false });
+scopeCheck("Erik no transactions    -> refer + R8 refer", sNoTx.outcome === "refer" && r8Of(sNoTx) === "refer", `(${sNoTx.outcomeLabel})`);
+const sNoBal = runErik({ ...FULL_SCOPE, balances: false });
+scopeCheck("Erik no balances        -> refer + R8 refer", sNoBal.outcome === "refer" && r8Of(sNoBal) === "refer", `(${sNoBal.outcomeLabel})`);
+const sNoSo = runErik({ ...FULL_SCOPE, standingOrders: false });
+scopeCheck("Erik no standing orders -> approve (optional)", sNoSo.outcome === "approve" && r8Of(sNoSo) === "pass", `(${sNoSo.outcomeLabel})`);
+
+console.log(`\n${scopePass}/${scopeTotal} consent-scope checks pass.`);
+
+if (pass !== PROFILES.length || !flips || !bureauFlips || covPass !== covTotal || scopePass !== scopeTotal) process.exit(1);
