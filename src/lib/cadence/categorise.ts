@@ -19,6 +19,8 @@ export interface CategoriseResult {
   cache?: CacheStats;
   /** Provider/model that answered the live run, e.g. "Gemini 2.5 Flash". */
   model?: string;
+  /** A forced live run was rate-limited and served the model's cached labels instead. */
+  servedFromCache?: boolean;
 }
 
 /**
@@ -33,6 +35,8 @@ export interface LiveCategoriseOutput {
   cache?: CacheStats;
   /** Provider/model that answered, e.g. "Gemini 2.5 Flash" or "Llama 3.3 70B (Groq)". */
   model?: string;
+  /** A forced live run was rate-limited and served the model's cached labels instead. */
+  servedFromCache?: boolean;
 }
 
 export type LiveCategoriser = (
@@ -61,7 +65,7 @@ export async function categorise(
     }
     try {
       const out = await liveCategoriser(txns, opts);
-      return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model };
+      return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model, servedFromCache: out.servedFromCache };
     } catch (err) {
       return {
         transactions: categoriseWithRules(txns, "rules"),

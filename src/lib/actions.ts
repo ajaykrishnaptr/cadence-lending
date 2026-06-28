@@ -258,6 +258,7 @@ export async function recategoriseAction(input: { personaId: string; force?: boo
     error: result.error,
     cache: cache ?? null,
     model: result.model ?? null,
+    servedFromCache: result.servedFromCache ?? false,
     transactions: result.transactions,
   };
 }
@@ -296,6 +297,7 @@ export async function runLiveEvalAction(input?: { force?: boolean }) {
     totalAvailable: r.totalAvailable ?? null,
     cache: r.cache ?? null,
     model: r.model ?? null,
+    servedFromCache: r.servedFromCache ?? false,
     view: toEvalView(r.result),
   };
 }

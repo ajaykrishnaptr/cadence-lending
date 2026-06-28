@@ -213,39 +213,56 @@ export async function categoriseWithGeminiCached(
 ): Promise<LiveCategoriseOutput> {
   const cache = getCatCache();
   const keys = txns.map(cacheKey);
-  // `force` bypasses the cache READ so the model genuinely runs (the eval uses
-  // this so a viewer always sees a real live call), while fresh labels are still
-  // written back below.
-  const cached = opts?.force
-    ? new Map<string, CategorisedTransaction["categorisation"]>()
-    : await cache.getMany(keys);
+  // Always read the cache. In normal mode a hit skips the model; `force` ignores
+  // hits for the primary path (so the model genuinely runs and a viewer sees a
+  // real call) but the same hits are the safety net if every provider is down.
+  const cacheHits = await cache.getMany(keys);
 
   const out: CategorisedTransaction[] = new Array(txns.length);
-  const misses: { t: Transaction; i: number }[] = [];
+  const toModel: { t: Transaction; i: number }[] = [];
   txns.forEach((t, i) => {
-    const hit = cached.get(keys[i]);
-    if (hit) out[i] = { ...t, categorisation: hit, source: "gemini" };
-    else misses.push({ t, i });
+    const hit = cacheHits.get(keys[i]);
+    if (hit && !opts?.force) out[i] = { ...t, categorisation: hit, source: "gemini" };
+    else toModel.push({ t, i });
   });
 
   let modelLabel: string | undefined;
-  if (misses.length) {
-    const fresh = await categoriseWithGemini(misses.map((m) => m.t));
-    modelLabel = fresh.modelLabel;
-    const toPersist: { key: string; categorisation: CategorisedTransaction["categorisation"] }[] = [];
-    fresh.transactions.forEach((cat, j) => {
-      const { i } = misses[j];
-      out[i] = cat;
-      // only persist real model outputs, never per-line rules fallbacks
-      if (cat.source === "gemini") toPersist.push({ key: keys[i], categorisation: cat.categorisation });
-    });
-    if (toPersist.length) await cache.putMany(toPersist, fresh.modelId ?? "live");
+  let servedFromCache = false;
+  if (toModel.length) {
+    try {
+      const fresh = await categoriseWithGemini(toModel.map((m) => m.t));
+      modelLabel = fresh.modelLabel;
+      const toPersist: { key: string; categorisation: CategorisedTransaction["categorisation"] }[] = [];
+      fresh.transactions.forEach((cat, j) => {
+        const { i } = toModel[j];
+        out[i] = cat;
+        // only persist real model outputs, never per-line rules fallbacks
+        if (cat.source === "gemini") toPersist.push({ key: keys[i], categorisation: cat.categorisation });
+      });
+      if (toPersist.length) await cache.putMany(toPersist, fresh.modelId ?? "live");
+    } catch (liveErr) {
+      // Live providers are unavailable (e.g. every one rate-limited). If a forced
+      // run's lines are all already in the cache, serve those — they are the
+      // model's own prior labels — instead of dropping to the rules baseline. A
+      // non-forced run, or an incomplete cache, still throws (caller -> rules).
+      const everyCached = keys.every((k) => cacheHits.has(k));
+      if (opts?.force && everyCached) {
+        txns.forEach((t, i) => {
+          out[i] = { ...t, categorisation: cacheHits.get(keys[i])!, source: "gemini" };
+        });
+        servedFromCache = true;
+      } else {
+        throw liveErr;
+      }
+    }
   }
 
+  const liveCount = servedFromCache ? 0 : toModel.length;
   return {
     transactions: out,
-    cache: { hits: txns.length - misses.length, misses: misses.length, store: cache.kind },
+    cache: { hits: txns.length - liveCount, misses: liveCount, store: cache.kind },
     model: modelLabel,
+    servedFromCache,
   };
 }
 
@@ -286,6 +303,8 @@ export interface LiveEvalResult {
   cache?: CacheStats;
   /** Provider/model that answered, e.g. "Gemini 2.5 Flash" or "Llama 3.3 70B (Groq)". */
   model?: string;
+  /** A forced live run was rate-limited and served the model's cached labels. */
+  servedFromCache?: boolean;
 }
 
 export async function evaluateWithGemini(opts?: { force?: boolean }): Promise<LiveEvalResult> {
@@ -296,7 +315,7 @@ export async function evaluateWithGemini(opts?: { force?: boolean }): Promise<Li
   const all = getEvalCases();
   const sample = sampleEvalCases(all, LIVE_EVAL_SAMPLE);
   try {
-    const { transactions, cache, model } = await categoriseWithGeminiCached(sample.map((c) => c.transaction), opts);
+    const { transactions, cache, model, servedFromCache } = await categoriseWithGeminiCached(sample.map((c) => c.transaction), opts);
     const result = scoreCases(sample, transactions.map((t) => t.categorisation));
     return {
       result,
@@ -306,6 +325,7 @@ export async function evaluateWithGemini(opts?: { force?: boolean }): Promise<Li
       totalAvailable: all.length,
       cache,
       model,
+      servedFromCache,
     };
   } catch (err) {
     return {
