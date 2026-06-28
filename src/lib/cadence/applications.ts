@@ -51,6 +51,24 @@ export function outcomeToStatus(outcome: DecisionOutcome): ApplicationStatus {
   return outcome === "approve" ? "approved" : outcome === "refer" ? "referred" : "declined";
 }
 
+/**
+ * The scope the decision should be assessed against: a data category counts as
+ * granted only if it is granted at every still-active bank consent (AND across
+ * banks). No active consents (seed apps) → treat as full scope.
+ */
+export function effectiveScope(
+  consents: { scope: ConsentScope; status: "active" | "withdrawn" }[],
+): ConsentScope {
+  const active = consents.filter((c) => c.status === "active");
+  if (!active.length) return FULL_SCOPE;
+  return {
+    accounts: active.every((c) => c.scope.accounts),
+    balances: active.every((c) => c.scope.balances),
+    transactions: active.every((c) => c.scope.transactions),
+    standingOrders: active.every((c) => c.scope.standingOrders),
+  };
+}
+
 function seedId(personaId: string): string {
   return `seed-${personaId}`;
 }
@@ -116,13 +134,13 @@ export async function getSeedApplications(sessionId: string): Promise<AppListIte
   );
 }
 
-async function sessionAppToItem(a: AppRecord): Promise<AppListItem> {
+async function sessionAppToItem(a: AppRecord, scope?: ConsentScope): Promise<AppListItem> {
   const request: LoanRequest = {
     amount: a.amount,
     termMonths: a.termMonths,
     purpose: a.purpose,
   };
-  const d = await getDecision(a.personaId, request, "seed", undefined, a.connectedBanks ?? undefined);
+  const d = await getDecision(a.personaId, request, "seed", undefined, a.connectedBanks ?? undefined, scope);
   return {
     id: a.id,
     personaId: a.personaId,
@@ -144,11 +162,23 @@ async function sessionAppToItem(a: AppRecord): Promise<AppListItem> {
 /** Seeded portfolio + this session's submitted applications, newest first. */
 export async function getConsoleApplications(sessionId: string): Promise<AppListItem[]> {
   const store = getStore();
-  const [seed, session] = await Promise.all([
+  const [seed, session, consents] = await Promise.all([
     getSeedApplications(sessionId),
     store.listApplications(sessionId),
+    store.listConsents(sessionId),
   ]);
-  const sessionItems = await Promise.all(session.map(sessionAppToItem));
+  // group consents by application so each session app is scored against the
+  // scope its applicant actually granted (R8).
+  const byApp = new Map<string, typeof consents>();
+  for (const c of consents) {
+    if (!c.applicationId) continue;
+    const arr = byApp.get(c.applicationId) ?? [];
+    arr.push(c);
+    byApp.set(c.applicationId, arr);
+  }
+  const sessionItems = await Promise.all(
+    session.map((a) => sessionAppToItem(a, effectiveScope(byApp.get(a.id) ?? []))),
+  );
   // session submissions first (most relevant to the visitor), then portfolio
   return [...sessionItems, ...seed];
 }

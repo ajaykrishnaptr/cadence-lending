@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getSessionId } from "@/lib/session";
 import { getProfile } from "@/lib/demo-bank";
 import { getDecision, getAccountData } from "@/lib/cadence";
-import { resolveApplication, getConsentViews, outcomeToStatus } from "@/lib/cadence/applications";
+import { resolveApplication, getConsentViews, outcomeToStatus, effectiveScope } from "@/lib/cadence/applications";
 import { getStore } from "@/lib/store";
 import { buildRationale } from "@/lib/rationale";
 import { originationChecks } from "@/lib/origination";
@@ -22,10 +22,12 @@ export default async function ApplicationDetailPage({
   if (!profile) notFound();
 
   const banks = resolved.connectedBanks ?? undefined;
-  const [decision, accountData, consents] = await Promise.all([
-    getDecision(resolved.personaId, resolved.request, "seed", undefined, banks),
+  // the granted scope drives R8; assess against what the applicant consented to
+  const consents = await getConsentViews(sid, resolved);
+  const scope = effectiveScope(consents);
+  const [decision, accountData] = await Promise.all([
+    getDecision(resolved.personaId, resolved.request, "seed", undefined, banks, scope),
     getAccountData(resolved.personaId, banks),
-    getConsentViews(sid, resolved),
   ]);
 
   const [latest, auditRows] = await Promise.all([
