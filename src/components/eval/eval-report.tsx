@@ -36,8 +36,13 @@ export function EvalReport({
       const res = await runLiveEvalAction();
       setView(res.view);
       setSource(res.source);
-      setModelLabel(res.model ?? null);
-      if (res.fellBack || res.source === "rules") {
+      setModelLabel(res.servedFromCache ? "Cached model labels" : (res.model ?? null));
+      if (res.servedFromCache) {
+        toast.message("Showing the model's cached labels", {
+          description:
+            "The live providers are rate-limited right now (free tier). These are the model's own labels from an earlier run — not the rules baseline. Try again in a minute for a fresh call.",
+        });
+      } else if (res.fellBack || res.source === "rules") {
         const rateLimited = /quota|rate.?limit|429|resource.?exhausted/i.test(res.error ?? "");
         const description = !llmConfigured
           ? "No GEMINI_API_KEY configured — showing the deterministic baseline."
@@ -84,6 +89,19 @@ export function EvalReport({
         <Button onClick={runLive} disabled={pending} size="lg">
           {pending ? <><Sparkles className="h-4 w-4 animate-pulse" /> Running…</> : <><Play className="h-4 w-4" /> Run evaluation (live model)</>}
         </Button>
+      </div>
+
+      {/* How the live run behaves — set expectations before a viewer clicks. */}
+      <div className="flex items-start gap-2.5 rounded-xl border border-brand/20 bg-brand-muted/20 p-3.5 text-xs text-muted-foreground">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />
+        <p>
+          Each click runs the live model (Groq GPT-OSS 120B, with Gemini 2.5 Flash failover) over a 40-line sample.
+          The free-tier providers are rate-limited, so if a fresh call is not available this falls back to the
+          model&apos;s <span className="font-medium text-foreground">cached labels from an earlier run</span> (still the
+          model&apos;s own output), and only to the deterministic <span className="font-medium text-foreground">rules
+          baseline</span> if nothing is cached. The model only labels transactions — the credit decision itself is
+          deterministic. Synthetic data throughout.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

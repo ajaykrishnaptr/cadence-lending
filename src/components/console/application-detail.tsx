@@ -424,8 +424,10 @@ function TransactionsTab({ decision, personaId, withdrawn }: { decision: DetailP
       if (res.ok) {
         setTxns(res.transactions as CategorisedTransaction[]);
         setSource(res.source);
-        setLiveModel(res.model ?? null);
-        if (res.fellBack) toast.warning("Fell back to rules baseline", { description: res.error ?? "No live model available — using the deterministic categoriser." });
+        setLiveModel(res.servedFromCache ? "Cached model labels" : (res.model ?? null));
+        if (res.servedFromCache) {
+          toast.message("Showing the model's cached labels", { description: "Live providers are rate-limited right now (free tier) — these are the model's own labels from an earlier run, not the rules baseline." });
+        } else if (res.fellBack) toast.warning("Fell back to rules baseline", { description: res.error ?? "No live model available — using the deterministic categoriser." });
         else {
           const c = res.cache;
           const via = res.model ? ` via ${res.model}` : "";
