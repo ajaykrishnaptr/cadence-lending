@@ -19,6 +19,8 @@ export interface CategoriseResult {
   cache?: CacheStats;
   /** Provider/model that answered the live run, e.g. "Gemini 2.5 Flash". */
   model?: string;
+  /** A forced live run was rate-limited and served the model's cached labels instead. */
+  servedFromCache?: boolean;
 }
 
 /**
@@ -33,10 +35,13 @@ export interface LiveCategoriseOutput {
   cache?: CacheStats;
   /** Provider/model that answered, e.g. "Gemini 2.5 Flash" or "Llama 3.3 70B (Groq)". */
   model?: string;
+  /** A forced live run was rate-limited and served the model's cached labels instead. */
+  servedFromCache?: boolean;
 }
 
 export type LiveCategoriser = (
   txns: Transaction[],
+  opts?: { force?: boolean },
 ) => Promise<LiveCategoriseOutput>;
 
 let liveCategoriser: LiveCategoriser | null = null;
@@ -52,14 +57,15 @@ export function categoriseWithRules(txns: Transaction[], source: CategoriserSour
 export async function categorise(
   txns: Transaction[],
   source: CategoriserSource,
+  opts?: { force?: boolean },
 ): Promise<CategoriseResult> {
   if (source === "gemini") {
     if (!liveCategoriser) {
       return { transactions: categoriseWithRules(txns, "rules"), source: "rules", fellBack: true, error: "Live categoriser not configured" };
     }
     try {
-      const out = await liveCategoriser(txns);
-      return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model };
+      const out = await liveCategoriser(txns, opts);
+      return { transactions: out.transactions, source: "gemini", cache: out.cache, model: out.model, servedFromCache: out.servedFromCache };
     } catch (err) {
       return {
         transactions: categoriseWithRules(txns, "rules"),

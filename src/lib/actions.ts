@@ -9,7 +9,7 @@ import { getProfile, banksForPersona, bankName, detectConnectableBanks, queryCre
 import { getDecision, getCategorised } from "./cadence";
 import { originationChecks } from "./origination";
 import "./llm"; // side-effect: registers the live Gemini categoriser
-import { outcomeToStatus } from "./cadence/applications";
+import { outcomeToStatus, effectiveScope } from "./cadence/applications";
 import { CONSENT_PURPOSE, FULL_SCOPE } from "./cadence/applications";
 import type { ConsentScope, DecisionOutcome, LoanPurpose } from "./types";
 
@@ -93,7 +93,7 @@ export async function submitApplication(input: SubmitInput) {
   }
 
   // 2. engine decision (records the recommendation; status stays pending for the officer)
-  const decision = await getDecision(input.personaId, request, "seed", undefined, banks);
+  const decision = await getDecision(input.personaId, request, "seed", undefined, banks, scope);
   await store.recordDecision({
     sessionId: sid,
     applicationId: app.id,
@@ -114,6 +114,9 @@ export async function submitApplication(input: SubmitInput) {
   const missingCredit = registryDisclosures.filter(
     (d) => d.isCredit && missingBanks.includes(d.bankId),
   ).length;
+  // scope gap: data categories the assessment needs but the applicant withheld
+  const requiredScopes: (keyof ConsentScope)[] = ["accounts", "balances", "transactions"];
+  const withheldScopes = requiredScopes.filter((k) => !scope[k]);
   const events: { type: string; message: string; actor: "applicant" | "system"; meta?: Record<string, unknown> }[] = [
     ...banks.map((bankId) => ({
       type: "consent.granted",
@@ -129,6 +132,14 @@ export async function submitApplication(input: SubmitInput) {
           message: `Coverage gap — applicant connected ${banks.length} of ${all.length} known bank${all.length > 1 ? "s" : ""}. ${missingBanks.map(bankName).join(", ")} not connected${missingCredit > 0 ? `; the registry discloses ${missingCredit} credit agreement${missingCredit === 1 ? "" : "s"} there` : ""}. Automated approval is withheld pending full coverage.`,
           actor: "system" as const,
           meta: { connected: banks, missing: missingBanks, missingCredit },
+        }]
+      : []),
+    ...(withheldScopes.length
+      ? [{
+          type: "consent.scope_gap",
+          message: `Consent scope incomplete — applicant withheld ${withheldScopes.join(", ")}. An automated affordability decision needs the account list, balances and transaction history, so the application is referred for human review.`,
+          actor: "applicant" as const,
+          meta: { granted: scope, withheld: withheldScopes },
         }]
       : []),
     { type: "categorisation", message: `Categorised ${decision.transactions.length} transactions (${decision.categoriserSource} categoriser).`, actor: "system", meta: { source: decision.categoriserSource, count: decision.transactions.length } },
@@ -233,9 +244,13 @@ export async function queryRegistryAction(input: { personaId: string }) {
 }
 
 // ---- live re-categorisation (Gemini, with rules fallback) ----
-export async function recategoriseAction(input: { personaId: string }) {
+// Force a real model call by default (bypass the cache read) so the
+// "Re-categorise (live model)" button always exercises the model — a cached
+// run that made zero calls reads to a viewer as "no AI here". Same rationale as
+// the live eval.
+export async function recategoriseAction(input: { personaId: string; force?: boolean }) {
   const sid = await getSessionId();
-  const result = await getCategorised(input.personaId, "gemini");
+  const result = await getCategorised(input.personaId, "gemini", undefined, { force: input.force ?? true });
   const cache = result.cache;
   const modelNote = result.model ? ` via ${result.model}` : "";
   const cacheNote = cache ? ` (${cache.hits} from cache, ${cache.misses} live model calls${modelNote}; ${cache.store} cache)` : "";
@@ -254,6 +269,7 @@ export async function recategoriseAction(input: { personaId: string }) {
     error: result.error,
     cache: cache ?? null,
     model: result.model ?? null,
+    servedFromCache: result.servedFromCache ?? false,
     transactions: result.transactions,
   };
 }
@@ -275,10 +291,13 @@ export async function regenerateRationaleAction(input: {
 }
 
 // ---- live model evaluation (Gemini over a labelled sample) ----
-export async function runLiveEvalAction() {
+// Defaults to a genuine live run (force = bypass the cache read) so the button
+// labelled "Run evaluation (live model)" always makes a real model call — a
+// 100%-cache-hit run that made zero calls reads to a viewer as "no AI here".
+export async function runLiveEvalAction(input?: { force?: boolean }) {
   const { evaluateWithGemini } = await import("./llm");
   const { toEvalView } = await import("./eval");
-  const r = await evaluateWithGemini();
+  const r = await evaluateWithGemini({ force: input?.force ?? true });
   return {
     ok: true as const,
     source: r.source,
@@ -289,6 +308,7 @@ export async function runLiveEvalAction() {
     totalAvailable: r.totalAvailable ?? null,
     cache: r.cache ?? null,
     model: r.model ?? null,
+    servedFromCache: r.servedFromCache ?? false,
     view: toEvalView(r.result),
   };
 }
@@ -310,8 +330,11 @@ export async function withdrawConsentAction(input: { consentId: string; applicat
     const current = app.connectedBanks ?? banksForPersona(app.personaId);
     const remaining = current.filter((b) => b !== c.bankId);
     await store.updateConnectedBanks(sid, app.id, remaining);
+    // the withdrawn consent is already marked withdrawn, so effectiveScope reads
+    // the scope still granted across the banks that remain.
+    const remainingConsents = await store.getConsentsForApplication(sid, input.applicationId);
     const request = { amount: app.amount, termMonths: app.termMonths, purpose: app.purpose };
-    const d = await getDecision(app.personaId, request, "seed", undefined, remaining);
+    const d = await getDecision(app.personaId, request, "seed", undefined, remaining, effectiveScope(remainingConsents));
     await store.updateApplicationStatus(sid, app.id, outcomeToStatus(d.outcome));
     recomputedLabel = d.outcomeLabel;
   }

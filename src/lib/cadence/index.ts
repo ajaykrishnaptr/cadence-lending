@@ -1,7 +1,7 @@
 import { ais, type BalancePoint } from "../ais";
 import { getProfile, bureauInput, banksForPersona, bankName, queryCreditRegistry } from "../demo-bank";
 import { CONSUMER_LOAN, runDecision, type DecisionPackage, type ProductConfig } from "../engine";
-import type { Account, CategoriserSource, LoanRequest } from "../types";
+import type { Account, CategoriserSource, ConsentScope, LoanRequest } from "../types";
 import { categorise, type CategoriseResult } from "./categorise";
 
 export * from "./categorise";
@@ -41,6 +41,7 @@ export async function getCategorised(
   personaId: string,
   source: CategoriserSource = "seed",
   banks?: string[],
+  opts?: { force?: boolean },
 ): Promise<CategoriseResult> {
   const key = `${personaId}:${source}:${banksKey(banks)}`;
   if (source !== "gemini") {
@@ -48,7 +49,7 @@ export async function getCategorised(
     if (hit) return hit;
   }
   const tx = await ais.getTransactions(personaId, banks);
-  const result = await categorise(tx.transactions, source);
+  const result = await categorise(tx.transactions, source, opts);
   if (source !== "gemini") categoriseCache.set(key, result);
   return result;
 }
@@ -60,11 +61,15 @@ export async function getDecision(
   source: CategoriserSource = "seed",
   product: ProductConfig = CONSUMER_LOAN,
   banks?: string[],
+  scope?: ConsentScope,
 ): Promise<DecisionPackage & { categoriserSource: CategoriserSource; categoriserFellBack?: boolean }> {
   const profile = getProfile(personaId);
   if (!profile) throw new Error(`Unknown persona: ${personaId}`);
 
-  const key = `${personaId}:${product.id}:${request.amount}:${request.termMonths}:${request.purpose}:${source}:${banksKey(banks)}`;
+  const scopeKey = scope
+    ? `${+scope.accounts}${+scope.balances}${+scope.transactions}${+scope.standingOrders}`
+    : "full";
+  const key = `${personaId}:${product.id}:${request.amount}:${request.termMonths}:${request.purpose}:${source}:${banksKey(banks)}:${scopeKey}`;
   if (source !== "gemini" && decisionCache.has(key)) {
     const cached = decisionCache.get(key)!;
     return Object.assign(cached, { categoriserSource: source });
@@ -86,7 +91,7 @@ export async function getDecision(
     missingCreditCount: disclosures.filter((d) => d.isCredit && missingIds.includes(d.bankId)).length,
   };
 
-  const pkg = runDecision(cat.transactions, request, product, profile.householdSize, bureauInput(personaId), coverage);
+  const pkg = runDecision(cat.transactions, request, product, profile.householdSize, bureauInput(personaId), coverage, scope);
   const enriched = Object.assign(pkg, {
     categoriserSource: cat.source,
     categoriserFellBack: cat.fellBack,
