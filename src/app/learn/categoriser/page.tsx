@@ -161,9 +161,9 @@ export default function LearnCategoriserPage() {
         </LearnSection>
 
         <NextPageLink
-          href="/learn/affordability"
+          href="/learn/evals"
           label="Next"
-          title="The affordability engine"
+          title="How the AI is evaluated"
         />
       </div>
     </>

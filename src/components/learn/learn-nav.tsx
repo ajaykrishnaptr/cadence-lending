@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 const LINKS = [
   { href: "/learn", label: "How it works" },
-  { href: "/learn/categoriser", label: "Categoriser & evaluation" },
+  { href: "/learn/categoriser", label: "The categoriser" },
+  { href: "/learn/evals", label: "How the AI is evaluated" },
   { href: "/learn/affordability", label: "Affordability engine" },
   { href: "/learn/architecture", label: "Architecture & extensions" },
 ];
