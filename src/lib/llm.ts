@@ -10,6 +10,7 @@ import { cacheKey, getCatCache } from "./categoriser/cache";
 import { buildRationale } from "./rationale";
 import type { DecisionPackage } from "./engine";
 import type { EvalCase, EvalResult } from "./eval";
+import type { JudgeScores } from "./rationale-eval";
 import type { CategorisedTransaction, Transaction } from "./types";
 
 /**
@@ -386,5 +387,77 @@ export async function generateRationale(
     return { text: value.text.trim(), source: "gemini", model: provider.label };
   } catch {
     return { text: grounded, source: "rules", fellBack: true };
+  }
+}
+
+// ---- rationale LLM-as-judge (subjective dimensions) ----
+
+/** The figures a judge is allowed to check the rationale against. */
+function decisionFigures(d: DecisionPackage) {
+  return {
+    outcome: d.outcome,
+    outcomeLabel: d.outcomeLabel,
+    netMonthlyIncome: d.income.monthlyNet,
+    livingAllowance: d.haushalt.livingAllowance,
+    rent: d.haushalt.rent,
+    existingObligations: d.haushalt.obligations,
+    availableIncome: d.haushalt.available,
+    proposedInstalment: d.instalment,
+    stressedInstalment: d.stressedInstalment,
+    affordabilityBuffer: d.product.affordabilityBuffer,
+    dtiPct: Number((d.dti * 100).toFixed(1)),
+    maxDtiPct: d.product.maxDti * 100,
+    incomeStabilityPct: Math.round(d.income.stability * 100),
+    tenureMonths: d.income.tenureMonths,
+    rules: d.rules.map((r) => ({ rule: r.label, status: r.status })),
+    conditions: d.conditions,
+    recommendedLimit: d.recommendedLimit,
+    maxEligibleAmount: d.maxEligible,
+  };
+}
+
+const JUDGE_SYSTEM =
+  "You are a senior credit-risk reviewer scoring a lending-decision rationale " +
+  "written for a loan officer (not the applicant). Score three dimensions 1–5: " +
+  "relevance (does it address the decision and its actual drivers), balance (does " +
+  "it fairly present the factors for and against), and tone (professional, plain, " +
+  "no marketing or second-person voice). Set pass=false if the rationale reads as " +
+  "advice to the applicant, recommends whether to borrow, invents figures not in " +
+  "the data, or states an outcome the figures do not support. Figures in the " +
+  "rationale are rounded to whole euros and may restate derived values (the " +
+  "debt-to-income %, the affordability buffer ×, the maximum eligible amount); do " +
+  "not treat rounding or these derived figures as invented. Give a one-line remark.";
+
+const judgeSchema = z.object({
+  relevance: z.number().min(1).max(5),
+  balance: z.number().min(1).max(5),
+  tone: z.number().min(1).max(5),
+  pass: z.boolean(),
+  remark: z.string(),
+});
+
+/**
+ * LLM-as-judge for the rationale's subjective dimensions. Returns `undefined`
+ * when no provider is configured (the harness treats the judge as optional and
+ * non-blocking), so the deterministic checks remain the gate.
+ */
+export async function judgeRationale(
+  text: string,
+  d: DecisionPackage,
+): Promise<JudgeScores | undefined> {
+  if (!llmConfigured()) return undefined;
+  try {
+    const { value } = await withFailover((m) =>
+      generateObject({
+        model: m,
+        schema: judgeSchema,
+        temperature: 0.1,
+        system: JUDGE_SYSTEM,
+        prompt: `Decision figures:\n${JSON.stringify(decisionFigures(d), null, 2)}\n\nRationale to score:\n"""\n${text}\n"""`,
+      }),
+    );
+    return value.object;
+  } catch {
+    return undefined;
   }
 }

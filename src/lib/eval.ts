@@ -20,6 +20,13 @@ export interface EvalCase {
   personaId?: string;
   /** Why this case is tricky (hard cases only). */
   note?: string;
+  /**
+   * Ground-truth boolean flags, present only for seeded lines (the generator
+   * stamps them). Hard cases carry a category only, so flag accuracy is scored
+   * over the seeded set. These flags feed the affordability engine directly, so
+   * they matter as much as the category label.
+   */
+  truthFlags?: { isIncome: boolean; isRecurring: boolean; isObligation: boolean };
 }
 
 export interface CaseResult extends EvalCase {
@@ -36,6 +43,53 @@ export interface CategoryMetric {
   f1: number;
 }
 
+/**
+ * Accuracy of the three boolean flags the model emits alongside the category.
+ * Each is scored as its own binary classifier against the generator's ground
+ * truth. `support` is the number of positive (true) cases.
+ */
+export interface FlagMetric {
+  flag: "isIncome" | "isRecurring" | "isObligation";
+  support: number;
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1: number;
+}
+
+const FLAG_KEYS = ["isIncome", "isRecurring", "isObligation"] as const;
+
+function scoreFlags(
+  cases: EvalCase[],
+  predictions: Categorisation[],
+): FlagMetric[] {
+  const scored = cases
+    .map((c, i) => ({ truth: c.truthFlags, pred: predictions[i] }))
+    .filter((x): x is { truth: NonNullable<EvalCase["truthFlags"]>; pred: Categorisation } =>
+      Boolean(x.truth),
+    );
+  if (scored.length === 0) return [];
+  return FLAG_KEYS.map((flag) => {
+    let tp = 0;
+    let fp = 0;
+    let fn = 0;
+    let tn = 0;
+    for (const { truth, pred } of scored) {
+      const t = truth[flag];
+      const p = pred[flag];
+      if (t && p) tp++;
+      else if (!t && p) fp++;
+      else if (t && !p) fn++;
+      else tn++;
+    }
+    const n = tp + fp + fn + tn;
+    const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+    const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+    const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+    return { flag, support: tp + fn, accuracy: n ? (tp + tn) / n : 0, precision, recall, f1 };
+  });
+}
+
 export interface EvalResult {
   total: number;
   correct: number;
@@ -44,6 +98,8 @@ export interface EvalResult {
   hardCorrect: number;
   hardAccuracy: number;
   perCategory: CategoryMetric[];
+  /** Accuracy of the isIncome/isRecurring/isObligation flags (seeded cases). */
+  flags: FlagMetric[];
   /** confusion[actual][predicted] = count. */
   confusion: Record<Category, Record<Category, number>>;
   /** Present categories (those with any support or predictions). */
@@ -59,8 +115,19 @@ export function getEvalCases(): EvalCase[] {
     const data = getPersonaData(p.id);
     if (!data) continue;
     for (const t of data.transactions) {
-      const { truth: _t, balance: _b, ...tx } = t;
-      cases.push({ id: t.id, transaction: tx, truth: t.truth.category, isHard: false, personaId: p.id });
+      const { truth, balance: _b, ...tx } = t;
+      cases.push({
+        id: t.id,
+        transaction: tx,
+        truth: truth.category,
+        isHard: false,
+        personaId: p.id,
+        truthFlags: {
+          isIncome: truth.isIncome,
+          isRecurring: truth.isRecurring,
+          isObligation: truth.isObligation,
+        },
+      });
     }
   }
   for (const hc of HARD_CASES) {
@@ -142,6 +209,7 @@ export function scoreCases(cases: EvalCase[], predictions: Categorisation[]): Ev
     hardCorrect,
     hardAccuracy: hard.length ? hardCorrect / hard.length : 0,
     perCategory,
+    flags: scoreFlags(cases, predictions),
     confusion,
     labels,
     misclassified: results.filter((r) => !r.correct),
@@ -167,6 +235,7 @@ export interface EvalView {
   hardCorrect: number;
   hardAccuracy: number;
   perCategory: CategoryMetric[];
+  flags: FlagMetric[];
   confusion: Record<Category, Record<Category, number>>;
   labels: Category[];
   misclassified: MisclassView[];
@@ -182,6 +251,7 @@ export function toEvalView(r: EvalResult): EvalView {
     hardCorrect: r.hardCorrect,
     hardAccuracy: r.hardAccuracy,
     perCategory: r.perCategory,
+    flags: r.flags,
     confusion: r.confusion,
     labels: r.labels,
     misclassified: r.misclassified.map((m) => ({

@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "verify": "tsx scripts/verify-engine.ts"
+    "verify": "tsx scripts/verify-engine.ts",
+    "verify:rationale": "tsx scripts/verify-rationale.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.0",
